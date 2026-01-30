@@ -4,6 +4,10 @@ const cors = require("cors");
 const apiRoutes = require("./routes/api");
 const authRoutes = require("./routes/auth");
 const { PrismaClient } = require("@prisma/client");
+const shipmentRoutes = require('./routes/shipments');
+const deliveryRoutes = require('./routes/delivery');
+const transactionRoutes = require('./routes/transaction');
+
 
 dotenv.config();
 const app = express();
@@ -17,6 +21,9 @@ app.get('/', (req, res) => {
 
 app.use('/api', apiRoutes);
 app.use('/api/auth', authRoutes);
+app.use('/api/shipments', shipmentRoutes);
+app.use('/api/deliveries', deliveryRoutes);
+app.use('/api/transactions', transactionRoutes);
 
 process.on('uncaughtException', (err) => {
     console.error('UNCAUGHT EXCEPTION! 💥 Shutting down...');
