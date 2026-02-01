@@ -1,20 +1,34 @@
 const express = require("express");
 const dotenv = require("dotenv");
 const cors = require("cors");
+const http = require("http");
+const { Server } = require("socket.io");
 const apiRoutes = require("./routes/api");
 const authRoutes = require("./routes/auth");
 const { PrismaClient } = require("@prisma/client");
 const shipmentRoutes = require('./routes/shipments');
 const deliveryRoutes = require('./routes/delivery');
 const transactionRoutes = require('./routes/transaction');
-
+const synergyRoutes = require('./routes/synergy');
 
 dotenv.config();
 const app = express();
+const server = http.createServer(app);
+const io = new Server(server, {
+    cors: {
+        origin: "*",
+        methods: ["GET", "POST"]
+    }
+});
+
 const prisma = new PrismaClient();
+
+// Make io accessible to our routers
+app.set('io', io);
 
 app.use(cors());
 app.use(express.json({ limit: '10mb' }));
+
 app.get('/', (req, res) => {
     res.send('Logistics Backend API Working');
 });
@@ -24,6 +38,21 @@ app.use('/api/auth', authRoutes);
 app.use('/api/shipments', shipmentRoutes);
 app.use('/api/deliveries', deliveryRoutes);
 app.use('/api/transactions', transactionRoutes);
+app.use('/api/synergy', synergyRoutes);
+
+// Socket.io connection logic
+io.on('connection', (socket) => {
+    console.log('A user connected:', socket.id);
+
+    socket.on('join', (room) => {
+        socket.join(room);
+        console.log(`Socket ${socket.id} joined room ${room}`);
+    });
+
+    socket.on('disconnect', () => {
+        console.log('User disconnected:', socket.id);
+    });
+});
 
 process.on('uncaughtException', (err) => {
     console.error('UNCAUGHT EXCEPTION! 💥 Shutting down...');
@@ -45,7 +74,7 @@ async function startServer() {
         await prisma.$connect();
         console.log("Database connected successfully.");
 
-        app.listen(PORT, () => {
+        server.listen(PORT, () => {
             console.log(`Server is running on port ${PORT}`);
         }).on('error', (err) => {
             if (err.code === 'EADDRINUSE') {
@@ -62,4 +91,5 @@ async function startServer() {
 }
 
 startServer();
+
 
