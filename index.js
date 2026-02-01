@@ -10,6 +10,11 @@ const shipmentRoutes = require('./routes/shipments');
 const deliveryRoutes = require('./routes/delivery');
 const transactionRoutes = require('./routes/transaction');
 const synergyRoutes = require('./routes/synergy');
+const optimizationRoutes = require('./routes/routes');
+const truckRoutes = require('./routes/truck');
+const backhaulRoutes = require('./routes/backhaul');
+
+
 
 dotenv.config();
 const app = express();
@@ -39,6 +44,11 @@ app.use('/api/shipments', shipmentRoutes);
 app.use('/api/deliveries', deliveryRoutes);
 app.use('/api/transactions', transactionRoutes);
 app.use('/api/synergy', synergyRoutes);
+app.use('/api/routes', optimizationRoutes);
+app.use('/api/trucks', truckRoutes);
+app.use('/api/backhaul', backhaulRoutes);
+
+
 
 // Socket.io connection logic
 io.on('connection', (socket) => {

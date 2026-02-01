@@ -1,237 +1,269 @@
 const prisma = require('../config/database');
 
 /**
- * Task 1: Synergy Matching API
- * POST /api/synergy/search
+ * Phase 2: Real-time Proximity & Detection
+ * Logic to detect overlaps and create Absorption Opportunities
  */
-const searchSynergy = async (req, res) => {
+async function detectAbsorptionOpportunity(truckId, lat, lng, io) {
     try {
-        const { truckId } = req.body;
-        const io = req.app.get('io');
-
-        if (!truckId) {
-            return res.status(400).json({ success: false, message: 'truckId is required' });
-        }
-
-        // 1. Get Truck A (searching vehicle)
+        // 1. Find searching truck and its active route
         const truckA = await prisma.truck.findUnique({
             where: { id: truckId },
             include: {
-                deliveries: {
-                    where: { status: { notIn: ['COMPLETED', 'CANCELLED'] } },
-                    include: { shipment: true }
+                optimizedRoutes: {
+                    where: { status: 'ACTIVE' },
+                    include: { deliveries: true }
                 }
             }
         });
 
-        if (!truckA) {
-            return res.status(404).json({ success: false, message: 'Truck A not found' });
-        }
+        if (!truckA || truckA.optimizedRoutes.length === 0) return null;
+        const routeA = truckA.optimizedRoutes[0];
 
-        const activeDeliveryA = truckA.deliveries[0];
-        const currentLoadA = activeDeliveryA ? activeDeliveryA.cargoWeight : 0;
-        const cargoTypeA = activeDeliveryA?.shipment?.cargoType || '';
-
-        // 2. Proximity: Haversine Raw Query for candidates within 10km
-        const truckBLat = truckA.currentLat || 0;
-        const truckBLng = truckA.currentLng || 0;
-
-        // Haversine query provided by user
+        // 2. Find nearby Trucks (Truck B) within 5km
+        // Using raw query for haversine
         const nearbyTrucks = await prisma.$queryRaw`
-            SELECT id, "currentLat", "currentLng", "capacity", "ownerId", ( 6371 * acos( cos( radians(${truckBLat}) ) * cos( radians( "currentLat" ) ) 
-            * cos( radians( "currentLng" ) - radians(${truckBLng}) ) + sin( radians(${truckBLat}) ) 
+            SELECT id, "currentLat", "currentLng", ( 6371 * acos( cos( radians(${lat}) ) * cos( radians( "currentLat" ) ) 
+            * cos( radians( "currentLng" ) - radians(${lng}) ) + sin( radians(${lat}) ) 
             * sin( radians( "currentLat" ) ) ) ) AS distance 
             FROM "Truck" 
             WHERE id != ${truckId}
-            AND (6371 * acos( cos( radians(${truckBLat}) ) * cos( radians( "currentLat" ) ) 
-            * cos( radians( "currentLng" ) - radians(${truckBLng}) ) + sin( radians(${truckBLat}) ) 
-            * sin( radians( "currentLat" ) ) )) < 10
-            ORDER BY distance;
+            AND (6371 * acos( cos( radians(${lat}) ) * cos( radians( "currentLat" ) ) 
+            * cos( radians( "currentLng" ) - radians(${lng}) ) + sin( radians(${lat}) ) 
+            * sin( radians( "currentLat" ) ) )) < 5
         `;
 
-        // 3. Compatibility Filtering
-        const results = [];
         for (const candidate of nearbyTrucks) {
-            // Get active delivery for Truck B
             const truckB = await prisma.truck.findUnique({
                 where: { id: candidate.id },
                 include: {
-                    deliveries: {
-                        where: { status: { notIn: ['COMPLETED', 'CANCELLED'] } },
-                        include: { shipment: true }
-                    },
-                    owner: true
+                    optimizedRoutes: { where: { status: 'ACTIVE' }, include: { deliveries: true } }
                 }
             });
 
-            const activeDeliveryB = truckB.deliveries[0];
-            if (!activeDeliveryB) continue; // Must have an active mission
+            if (!truckB || truckB.optimizedRoutes.length === 0) continue;
+            const routeB = truckB.optimizedRoutes[0];
 
-            const cargoTypeB = activeDeliveryB.shipment.cargoType || '';
+            // 3. Find nearby VirtualHub (within radius or 5km)
+            const nearbyHubs = await prisma.$queryRaw`
+                SELECT id, latitude, longitude, radius, ( 6371 * acos( cos( radians(${lat}) ) * cos( radians( "latitude" ) ) 
+                * cos( radians( "longitude" ) - radians(${lng}) ) + sin( radians(${lat}) ) 
+                * sin( radians( "latitude" ) ) ) ) AS distance 
+                FROM "VirtualHub" 
+                WHERE (6371 * acos( cos( radians(${lat}) ) * cos( radians( "latitude" ) ) 
+                * cos( radians( "longitude" ) - radians(${lng}) ) + sin( radians(${lat}) ) 
+                * sin( radians( "latitude" ) ) )) < 5
+                LIMIT 1
+            `;
 
-            // Rule 1: Capacity
-            const residualCapacityA = (truckA.capacity || 0) - currentLoadA;
-            const capacityMet = residualCapacityA >= (activeDeliveryB.cargoWeight || 0);
-            if (!capacityMet) continue;
+            if (nearbyHubs.length === 0) continue;
+            const hub = nearbyHubs[0];
 
-            // Rule 2: Material (No Food/Pharma + Chemicals)
-            const isChemicalA = cargoTypeA.toLowerCase().includes('chemical');
-            const isFoodPharmaA = cargoTypeA.toLowerCase().includes('food') || cargoTypeA.toLowerCase().includes('pharma');
-            const isChemicalB = cargoTypeB.toLowerCase().includes('chemical');
-            const isFoodPharmaB = cargoTypeB.toLowerCase().includes('food') || cargoTypeB.toLowerCase().includes('pharma');
+            // 4. Constraint Logic: Capacity check
+            // Calculate Truck A residual capacity
+            const availableWeightA = (truckA.maxWeight || 0) - (truckA.currentWeight || 0);
+            const availableVolumeA = (truckA.maxVolume || 0) - (truckA.currentVolume || 0);
 
-            const safetyViolation = (isChemicalA && isFoodPharmaB) || (isFoodPharmaA && isChemicalB);
-            if (safetyViolation) continue;
+            // Can A absorb B's load?
+            const canAbsorb = (availableWeightA >= truckB.currentWeight) && (availableVolumeA >= truckB.currentVolume);
+            if (!canAbsorb) continue;
 
-            // Rule 3: Path (Same homeBaseCity or dropLocation)
-            const pathMet =
-                (truckA.owner?.homeBaseCity === truckB.owner?.homeBaseCity) ||
-                (activeDeliveryA?.dropLocation === activeDeliveryB.dropLocation);
+            // 5. Calculate Carbon Savings
+            const distanceSaved = candidate.distance; // Simplified: overlap distance approx dist between trucks
+            const carbonSaved = distanceSaved * (truckA.co2PerKm || 0.5);
 
-            // Note: Users specified "Only return trucks that share similar destination_id or next_checkpoint_id" in previous prompt,
-            // and "Same homeBaseCity or dropLocation" in this prompt. I'll prioritize the current prompt.
-
-            results.push({
-                truckId: truckB.id,
-                plate: truckB.licensePlate,
-                distance: parseFloat(candidate.distance).toFixed(2),
-                cargoType: cargoTypeB,
-                cargoWeight: activeDeliveryB.cargoWeight,
-                dropLocation: activeDeliveryB.dropLocation,
-                pathMet
+            // 6. Create Opportunity
+            const opportunity = await prisma.absorptionOpportunity.create({
+                data: {
+                    route1Id: routeA.id,
+                    route2Id: routeB.id,
+                    overlapDistanceKm: parseFloat(distanceSaved),
+                    overlapStartTime: new Date(),
+                    overlapEndTime: new Date(Date.now() + 3600000),
+                    nearestHubId: hub.id,
+                    overlapCenterLat: lat,
+                    overlapCenterLng: lng,
+                    estimatedMeetTime: new Date(Date.now() + 1800000),
+                    timeWindow: 30,
+                    eligibleDeliveryIds: routeB.deliveries.map(d => d.id).join(','),
+                    truck1DistanceBefore: 0,
+                    truck1DistanceAfter: 0,
+                    truck2DistanceBefore: 0,
+                    truck2DistanceAfter: 0,
+                    totalDistanceSaved: parseFloat(distanceSaved),
+                    potentialCarbonSaved: carbonSaved,
+                    spaceRequiredVolume: truckB.currentVolume,
+                    spaceRequiredWeight: truckB.currentWeight,
+                    truck1SpaceAvailable: availableVolumeA,
+                    truck2SpaceAvailable: (truckB.maxVolume || 0) - (truckB.currentVolume || 0),
+                    expiresAt: new Date(Date.now() + 3600000),
+                    status: 'PENDING'
+                }
             });
+
+            // 7. Socket Notification
+            io.emit('synergy:absorption_opportunity', {
+                opportunityId: opportunity.id,
+                truckA: truckA.id,
+                truckB: truckB.id,
+                hub: hub.id,
+                carbonSaved: carbonSaved.toFixed(2)
+            });
+
+            return opportunity;
         }
 
-        // 4. Notification
-        if (results.length > 0) {
-            io.emit('synergy:matches_found', {
-                searchingTruckId: truckId,
-                matches: results
-            });
-        }
-
-        res.status(200).json({
-            success: true,
-            data: results
-        });
-
+        return null;
     } catch (error) {
-        console.error('Synergy Search Error:', error);
-        res.status(500).json({ success: false, message: 'Internal server error' });
+        console.error('Proximity detection error:', error);
+        return null;
     }
-};
+}
 
 /**
- * Task 2 & 3: Acceptance & Relay Workflow
- * POST /api/synergy/accept
+ * Phase 3: Handshake & Transfer
+ * Handles QR scan and workload-based relay
  */
-const acceptSynergy = async (req, res) => {
+async function handleHandshake(req, res) {
     try {
-        const { truckAId, truckBId, hubId } = req.body;
+        const { opportunityId, qrData } = req.body;
+        const io = req.app.get('io');
 
-        if (!truckAId || !truckBId || !hubId) {
-            return res.status(400).json({ success: false, message: 'Missing required parameters' });
-        }
-
-        // 1. Fetch data
-        const [truckA, truckB, hub] = await prisma.$transaction([
-            prisma.truck.findUnique({ where: { id: truckAId }, include: { owner: true, deliveries: { where: { status: 'IN_TRANSIT' } } } }),
-            prisma.truck.findUnique({ where: { id: truckBId }, include: { owner: true, deliveries: { where: { status: 'IN_TRANSIT' } } } }),
-            prisma.virtualHub.findUnique({ where: { id: hubId } })
-        ]);
-
-        if (!truckA || !truckB || !hub) {
-            return res.status(404).json({ success: false, message: 'Entities not found' });
-        }
-
-        const deliveryA = truckA.deliveries[0];
-        const deliveryB = truckB.deliveries[0];
-
-        // 2. JIT Sync Calculation (Mock logic for speed recommendation)
-        // In a real app, distance to hub would be calculated via map API
-        const distAtoHub = calculateDistance(truckA.currentLat, truckA.currentLng, hub.latitude, hub.longitude);
-        const distBtoHub = calculateDistance(truckB.currentLat, truckB.currentLng, hub.latitude, hub.longitude);
-
-        const targetArrivalInHrs = 0.5; // Example: both should arrive in 30 mins
-        const speedA = distAtoHub / targetArrivalInHrs;
-        const speedB = distBtoHub / targetArrivalInHrs;
-
-        // 3. Driver Relay Rule (Workload-based assignment)
-        // Assign longest segment to driver with highest workload
-        const workloadA = (truckA.owner.totalDistanceKm || 0) + (truckA.owner.totalHoursWorked || 0);
-        const workloadB = (truckB.owner.totalDistanceKm || 0) + (truckB.owner.totalHoursWorked || 0);
-
-        let primaryDriver, secondaryDriver;
-        if (workloadA >= workloadB) {
-            primaryDriver = truckA.owner;
-            secondaryDriver = truckB.owner;
-        } else {
-            primaryDriver = truckB.owner;
-            secondaryDriver = truckA.owner;
-        }
-
-        // 4. Initialize RelayNode & OTP
-        const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
-
-        const relayNode = await prisma.relayNode.create({
-            data: {
-                hubId: hub.id,
-                truckAId: truckA.id,
-                truckBId: truckB.id,
-                segmentDistanceKm: distAtoHub + distBtoHub,
-                segmentTimeHrs: targetArrivalInHrs,
-                handshakeStatus: 'WAITING_FOR_PEERS',
-                otpCode: otpCode,
-                // Using delivery records or other fields if needed for schema compatibility
+        // 1. Fetch Opportunity
+        const opportunity = await prisma.absorptionOpportunity.findUnique({
+            where: { id: opportunityId },
+            include: {
+                route1: { include: { truck: { include: { owner: true } } } },
+                route2: { include: { truck: { include: { owner: true } } } }
             }
         });
 
-        // 5. Update Delivery Assignments (Re-routing B's load to the "Primary" truck for the long haul)
-        // This is a simplified consolidation logic
-        if (deliveryB) {
-            await prisma.delivery.update({
-                where: { id: deliveryB.id },
-                data: {
-                    truckId: workloadA >= workloadB ? truckA.id : truckB.id,
-                    driverId: primaryDriver.id,
-                    relayNodeId: relayNode.id
-                }
-            });
+        if (!opportunity) {
+            return res.status(404).json({ success: false, message: 'Opportunity not found' });
         }
+
+        // 2. Driver Relay Rule: Assign longer segment to driver with higher workload
+        // Workload = totalDistanceKm + totalHoursWorked
+        const driver1 = opportunity.route1.truck.owner;
+        const driver2 = opportunity.route2.truck.owner;
+
+        const workload1 = (driver1.totalDistanceKm || 0) + (driver1.totalHoursWorked || 0);
+        const workload2 = (driver2.totalDistanceKm || 0) + (driver2.totalHoursWorked || 0);
+
+        let longHaulDriver, shortHaulDriver, masterTruckId;
+        if (workload1 >= workload2) {
+            longHaulDriver = driver1;
+            shortHaulDriver = driver2;
+            masterTruckId = opportunity.route1.truck.id;
+        } else {
+            longHaulDriver = driver2;
+            shortHaulDriver = driver1;
+            masterTruckId = opportunity.route2.truck.id;
+        }
+
+        // 3. Update Status and finalize transfer
+        await prisma.$transaction([
+            // Update opportunity status
+            prisma.absorptionOpportunity.update({
+                where: { id: opportunityId },
+                data: { status: 'COMPLETED' }
+            }),
+            // Reassign deliveries from Route 2 to Truck A (if Route 1 is the master)
+            prisma.delivery.updateMany({
+                where: { optimizedRouteId: opportunity.route2Id },
+                data: {
+                    truckId: masterTruckId,
+                    driverId: longHaulDriver.id,
+                    status: 'ABSORPTION_TRANSFERRED'
+                }
+            })
+        ]);
+
+        // 4. Emit Completion
+        io.emit('synergy:absorption_completed', {
+            opportunityId,
+            assignedDriver: longHaulDriver.name
+        });
 
         res.status(200).json({
             success: true,
+            message: 'Handshake completed and relay rule applied',
             data: {
-                relayId: relayNode.id,
-                otpCode,
-                syncSpeeds: {
-                    truckA: speedA.toFixed(2) + ' km/h',
-                    truckB: speedB.toFixed(2) + ' km/h'
-                },
-                assignments: {
-                    longRouteDriver: primaryDriver.name,
-                    shortRouteDriver: secondaryDriver.name
-                }
+                longHaulDriver: longHaulDriver.name,
+                shortHaulDriver: shortHaulDriver.name
             }
         });
 
     } catch (error) {
-        console.error('Accept Synergy Error:', error);
+        console.error('Handshake Error:', error);
         res.status(500).json({ success: false, message: 'Internal server error' });
     }
-};
+}
 
-// Helper for distance (Earth Radius 6371km)
-function calculateDistance(lat1, lon1, lat2, lon2) {
-    const p = 0.017453292519943295;    // Math.PI / 180
-    const c = Math.cos;
-    const a = 0.5 - c((lat2 - lat1) * p) / 2 +
-        c(lat1 * p) * c(lat2 * p) *
-        (1 - c((lon2 - lon1) * p)) / 2;
-    return 12742 * Math.asin(Math.sqrt(a)); // 2 * R; R = 6371 km
+/**
+ * Legacy Search API (Updated for new schema)
+ */
+async function searchSynergy(req, res) {
+    try {
+        const { truckId } = req.body;
+        // Simplified search using distance detect logic
+        const truck = await prisma.truck.findUnique({ where: { id: truckId } });
+        if (!truck) return res.status(404).json({ message: 'Truck not found' });
+
+        const opportunity = await detectAbsorptionOpportunity(truckId, truck.currentLat, truck.currentLng, req.app.get('io'));
+
+        res.status(200).json({
+            success: true,
+            opportunity
+        });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+}
+
+/**
+ * Phase 2.5: Accept Synergy
+ */
+async function acceptSynergy(req, res) {
+    try {
+        const { opportunityId, routeId } = req.body;
+
+        const opportunity = await prisma.absorptionOpportunity.findUnique({
+            where: { id: opportunityId }
+        });
+
+        if (!opportunity) {
+            return res.status(404).json({ message: 'Opportunity not found' });
+        }
+
+        let updateData = {};
+        if (opportunity.route1Id === routeId) {
+            updateData.status = opportunity.status === 'ACCEPTED_BY_ROUTE2' ? 'BOTH_ACCEPTED' : 'ACCEPTED_BY_ROUTE1';
+            updateData.acceptedByRoute1At = new Date();
+        } else if (opportunity.route2Id === routeId) {
+            updateData.status = opportunity.status === 'ACCEPTED_BY_ROUTE1' ? 'BOTH_ACCEPTED' : 'ACCEPTED_BY_ROUTE2';
+            updateData.acceptedByRoute2At = new Date();
+        } else {
+            return res.status(400).json({ message: 'Route ID does not match this opportunity' });
+        }
+
+        const updated = await prisma.absorptionOpportunity.update({
+            where: { id: opportunityId },
+            data: updateData
+        });
+
+        res.status(200).json({
+            success: true,
+            opportunity: updated
+        });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
 }
 
 module.exports = {
+    detectAbsorptionOpportunity,
+    handleHandshake,
     searchSynergy,
     acceptSynergy
 };

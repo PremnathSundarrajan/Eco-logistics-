@@ -64,15 +64,40 @@ const ewbNo = () => `EWB-2026-${rand(100000, 999999)}`;
 async function main() {
   console.log('🌱 Seeding started...\n');
 
-  await prisma.transaction.deleteMany();
-  await prisma.notification.deleteMany();
-  await prisma.delivery.deleteMany();
-  await prisma.eWayBill.deleteMany();
-  await prisma.shipment.deleteMany();
-  await prisma.truck.deleteMany();
-  await prisma.virtualHub.deleteMany();
-  await prisma.activityLog.deleteMany();
-  await prisma.user.deleteMany();
+  async function safeDelete(modelName) {
+    try {
+      await prisma[modelName].deleteMany();
+    } catch (err) {
+      if (err.code === 'P2021') {
+        console.warn(`⚠️ Table for ${modelName} not found, skipping cleanup.`);
+      } else {
+        throw err;
+      }
+    }
+  }
+
+  const modelsToCleanup = [
+    'absorptionTransfer',
+    'absorptionOpportunity',
+    'optimizedRoute',
+    'backhaulPickup',
+    'carbonMetric',
+    'routeCache',
+    'transaction',
+    'notification',
+    'delivery',
+    'eWayBill',
+    'shipment',
+    'truck',
+    'virtualHub',
+    'activityLog',
+    'user',
+    'courierCompany'
+  ];
+
+  for (const model of modelsToCleanup) {
+    await safeDelete(model);
+  }
 
   /* -------- Dispatcher -------- */
   const dispatcher = await prisma.user.create({
@@ -110,6 +135,8 @@ async function main() {
         model: truckInfo.model,
         type: truckInfo.type,
         capacity: truckInfo.capacity,
+        maxWeight: truckInfo.capacity * 1000, // Assuming capacity is in tons, maxWeight in kg
+        maxVolume: truckInfo.capacity * 2,    // Just a mock calculation
         ownerId: driver.id,
         currentLat: city.lat,
         currentLng: city.lng,
@@ -134,8 +161,24 @@ async function main() {
     );
   }
 
+  /* -------- Virtual Hubs -------- */
+  for (const city of CITIES) {
+    await prisma.virtualHub.create({
+      data: {
+        name: `${city.name} Hub`,
+        latitude: city.lat,
+        longitude: city.lng,
+        type: 'RELAY',
+        radius: 5.0,
+      },
+    });
+  }
+
   /* -------- Shipments → Deliveries → Transactions -------- */
+  console.log(`Starting creation of ${shippers.length} shippers...`);
+  console.log(`Starting loop for 10 shipments/deliveries...`);
   for (let i = 0; i < 10; i++) {
+    console.log(`Iteration ${i}...`);
     const shipper = pick(shippers);
     const driver = pick(drivers);
     const truck = trucks.find((t) => t.ownerId === driver.id);
@@ -146,72 +189,77 @@ async function main() {
     const distanceKm = rand(200, 1200);
     const weight = rand(5, 18);
 
-    const shipment = await prisma.shipment.create({
-      data: {
-        shipperId: shipper.id,
-        dispatcherId: dispatcher.id,
-        pickupLocation: from.name,
-        pickupLat: from.lat,
-        pickupLng: from.lng,
-        dropLocation: to.name,
-        dropLat: to.lat,
-        dropLng: to.lng,
-        cargoType: pick(CARGO_TYPES),
-        cargoWeight: weight,
-        estimatedPrice: distanceKm * 18,
-        finalPrice: distanceKm * 19,
-        status: 'COMPLETED',
-      },
-    });
+    try {
+      const shipment = await prisma.shipment.create({
+        data: {
+          shipperId: shipper.id,
+          pickupLocation: from.name,
+          pickupLat: from.lat,
+          pickupLng: from.lng,
+          dropLocation: to.name,
+          dropLat: to.lat,
+          dropLng: to.lng,
+          cargoType: pick(CARGO_TYPES),
+          cargoWeight: weight,
+          estimatedPrice: distanceKm * 18,
+          finalPrice: distanceKm * 19,
+          status: 'COMPLETED',
+        },
+      });
 
-    const delivery = await prisma.delivery.create({
-      data: {
-        driverId: driver.id,
-        truckId: truck.id,
-        shipmentId: shipment.id,
-        pickupLocation: shipment.pickupLocation,
-        pickupLat: shipment.pickupLat,
-        pickupLng: shipment.pickupLng,
-        dropLocation: shipment.dropLocation,
-        dropLat: shipment.dropLat,
-        dropLng: shipment.dropLng,
-        cargoType: shipment.cargoType,
-        cargoWeight: shipment.cargoWeight,
-        distanceKm,
-        packageId: tripId(),
-        baseEarnings: distanceKm * 18,
-        fuelSurcharge: distanceKm * 2,
-        totalEarnings: distanceKm * 20,
-        status: 'COMPLETED',
-        completedAt: new Date(),
-      },
-    });
+      const delivery = await prisma.delivery.create({
+        data: {
+          dispatcher: { connect: { id: dispatcher.id } },
+          driver: { connect: { id: driver.id } },
+          truck: { connect: { id: truck.id } },
+          shipment: { connect: { id: shipment.id } },
+          pickupLocation: shipment.pickupLocation,
+          pickupLat: shipment.pickupLat,
+          pickupLng: shipment.pickupLng,
+          dropLocation: shipment.dropLocation,
+          dropLat: shipment.dropLat,
+          dropLng: shipment.dropLng,
+          cargoType: shipment.cargoType,
+          cargoWeight: shipment.cargoWeight,
+          cargoVolumeLtrs: shipment.cargoWeight * 1.5, // Mock volume
+          distanceKm,
+          packageId: `PKG-${rand(100000, 999999)}`,
+          baseEarnings: distanceKm * 18,
+          fuelSurcharge: distanceKm * 2,
+          totalEarnings: distanceKm * 20,
+          status: 'COMPLETED',
+          completedAt: new Date(),
+        },
+      });
 
-    await prisma.transaction.create({
-      data: {
-        driverId: driver.id,
-        deliveryId: delivery.id,
-        amount: delivery.totalEarnings,
-        type: 'BASE_DELIVERY',
-        description: 'Delivery completed',
-        route: `${from.name} → ${to.name}`,
-      },
-    });
+      await prisma.transaction.create({
+        data: {
+          driverId: driver.id,
+          deliveryId: delivery.id,
+          amount: delivery.totalEarnings,
+          type: 'BASE_DELIVERY',
+          description: 'Delivery completed',
+          route: `${from.name} → ${to.name}`,
+        },
+      });
 
-    /* -------- E-Way Bill (STRING distance – schema safe) -------- */
-    await prisma.eWayBill.create({
-      data: {
-        billNo: ewbNo(),
-        vehicleNo: truck.licensePlate,
-        from: from.name,
-        to: to.name,
-        distance: `${distanceKm} km`,
-        driverId: driver.id,
-        cargoValue: `₹${rand(5, 15)}L`,
-        validUntil: new Date(Date.now() + 48 * 3600000),
-        status: 'TRANSFERRED',
-      },
-    });
+      /* -------- E-Way Bill (STRING distance – schema safe) -------- */
+      await prisma.eWayBill.create({
+        data: {
+          billNo: ewbNo(),
+          vehicleNo: truck.licensePlate,
+          from: from.name,
+          to: to.name,
+          distance: `${distanceKm} km`,
+          driverId: driver.id,
+          cargoValue: `₹${rand(5, 15)}L`,
+          validUntil: new Date(Date.now() + 48 * 3600000),
+          status: 'TRANSFERRED',
+        },
+      });
+    } catch (err) {
+      console.error(`Error in iteration ${i}:`, err.message);
+    }
   }
 
   console.log('🎉 Seeding completed successfully');

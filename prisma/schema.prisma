@@ -8,16 +8,12 @@ datasource db {
   directUrl = env("DIRECT_URL")
 }
 
-// ============================================
-// 1. USER MODEL
-// ============================================
 model User {
   id    String @id @default(uuid())
   name  String
   phone String @unique
   role  Role   @default(DRIVER)
 
-  // Driver specific fields (null for others)
   totalDistanceKm  Float        @default(0.0)
   totalHoursWorked Float        @default(0.0)
   homeBaseCity     String?
@@ -29,26 +25,39 @@ model User {
   vehicleType      String?
   currentVehicleNo String?
 
-  // Fair-Share Algorithm
   weeklyKmDriven Float    @default(0.0)
   weekResetDate  DateTime @default(now())
   lastActiveDate DateTime @default(now())
 
-  // ✅ NEW: Earnings tracking
   totalEarnings  Float @default(0.0)
   weeklyEarnings Float @default(0.0)
 
-  // Relations
+  courierCompanyId String?
+  courierCompany   CourierCompany? @relation(fields: [courierCompanyId], references: [id])
+  
+  registrationStatus RegistrationStatus @default(PENDING)
+  registeredAt       DateTime?
+  approvedBy         String?
+  
+  qrCode             String? @unique
+
   trucks                Truck[]
-  createdShipments      Shipment[]     @relation("ShipperToShipments")
-  approvedShipments     Shipment[]     @relation("DispatcherApprovals")
-  assignedDeliveries    Delivery[]     @relation("DriverDeliveries")
+  createdShipments      Shipment[]        @relation("ShipperToShipments")
+  dispatchedDeliveries  Delivery[]        @relation("DispatcherToDeliveries")
+  assignedDeliveries    Delivery[]        @relation("DriverDeliveries")
+  driverOptimizedRoutes OptimizedRoute[]  @relation("DriverOptimizedRoutes")
   eWayBills             EWayBill[]
   notifications         Notification[]
-  transactions          Transaction[]  // ✅ NEW
+  transactions          Transaction[]
+  exportedAbsorptions   AbsorptionTransfer[] @relation("ExporterDriver")
+  importedAbsorptions   AbsorptionTransfer[] @relation("ImporterDriver")
+  backhaulPickups       BackhaulPickup[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+  
+  @@index([courierCompanyId, registrationStatus])
+  @@index([qrCode])
 }
 
 enum Role {
@@ -64,9 +73,31 @@ enum DriverStatus {
   OFF_DUTY
 }
 
-// ============================================
-// 2. TRUCK MODEL
-// ============================================
+enum RegistrationStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  SUSPENDED
+}
+
+model CourierCompany {
+  id          String  @id @default(uuid())
+  name        String  @unique
+  code        String  @unique
+  isActive    Boolean @default(true)
+  
+  adminEmail  String?
+  adminPhone  String?
+  
+  drivers     User[]
+  trucks      Truck[]
+  deliveries  Delivery[]
+  routes      OptimizedRoute[]
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
 model Truck {
   id           String @id @default(uuid())
   licensePlate String @unique
@@ -80,20 +111,65 @@ model Truck {
   ownerId String
   owner   User   @relation(fields: [ownerId], references: [id])
 
+  courierCompanyId String?
+  courierCompany   CourierCompany? @relation(fields: [courierCompanyId], references: [id])
+
   currentLat Float?
   currentLng Float?
 
-  incomingRelays RelayNode[] @relation("IncomingTruck")
-  outgoingRelays RelayNode[] @relation("OutgoingTruck")
-  deliveries     Delivery[]
+  maxWeight           Float
+  maxVolume           Float
+  currentWeight       Float @default(0.0)
+  currentVolume       Float @default(0.0)
+  fuelType            FuelType?
+  co2PerKm            Float?
+  fuelConsumption     Float?
+  isAvailable         Boolean  @default(true)
+  
+  registrationStatus  RegistrationStatus @default(PENDING)
+  registeredAt        DateTime?
+  
+  sourceHubId         String?
+  sourceHub           VirtualHub? @relation("TruckSourceHub", fields: [sourceHubId], references: [id])
+
+  deliveries          Delivery[]
+  optimizedRoutes     OptimizedRoute[]
+  gpsLogs             GPSLog[]
+  backhaulPickups     BackhaulPickup[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  @@index([ownerId, isAvailable])
+  @@index([courierCompanyId, registrationStatus])
+  @@index([currentLat, currentLng])
+  @@index([sourceHubId])
 }
 
-// ============================================
-// 3. VIRTUAL HUB
-// ============================================
+enum FuelType {
+  PETROL
+  DIESEL
+  CNG
+  ELECTRIC
+}
+
+model GPSLog {
+  id        String   @id @default(uuid())
+  truckId   String
+  truck     Truck    @relation(fields: [truckId], references: [id])
+  
+  latitude  Float
+  longitude Float
+  speed     Float?
+  heading   Float?
+  accuracy  Float?
+  
+  timestamp DateTime @default(now())
+  
+  @@index([truckId, timestamp])
+  @@index([latitude, longitude])
+}
+
 model VirtualHub {
   id        String  @id @default(uuid())
   name      String
@@ -101,80 +177,342 @@ model VirtualHub {
   latitude  Float
   longitude Float
   type      String?
+  radius    Float?
 
-  relays RelayNode[]
-
-  createdAt DateTime @default(now())
-}
-
-// ============================================
-// 4. RELAY NODE
-// ============================================
-model RelayNode {
-  id    String     @id @default(uuid())
-  hubId String
-  hub   VirtualHub @relation(fields: [hubId], references: [id])
-
-  truckAId String
-  truckA   Truck  @relation("IncomingTruck", fields: [truckAId], references: [id])
-
-  truckBId String
-  truckB   Truck  @relation("OutgoingTruck", fields: [truckBId], references: [id])
-
-  segmentDistanceKm Float
-  segmentTimeHrs    Float
-
-  handshakeStatus HandshakeStatus @default(WAITING_FOR_PEERS)
-
-  otpCode     String?
-  qrCodeData  String?
-  gpsVerified Boolean @default(false)
-
-  photoFront     String?
-  photoBack      String?
-  photoLeft      String?
-  photoRight     String?
-  photoTimestamp DateTime?
-
-  driverASignature String?
-  driverBSignature String?
-
-  eWayBillsTransferred Int     @default(0)
-  eWayBillStatus       String?
-
-  cargoImageUrls Json?
+  trucksSourced           Truck[]                 @relation("TruckSourceHub")
+  absorptionOpportunities AbsorptionOpportunity[]
+  absorptionTransfers     AbsorptionTransfer[]
+  backhaulPickups         BackhaulPickup[]
 
   createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  deliveries Delivery[]
+  
+  @@index([latitude, longitude])
 }
 
-enum HandshakeStatus {
-  WAITING_FOR_PEERS
-  PROXIMITY_LOCKED
-  GPS_VERIFIED
-  PHOTOS_CAPTURED
-  QR_SCANNED
-  SIGNATURES_COLLECTED
-  AUTHORIZED
+model Delivery {
+  id              String @id @default(uuid())
+  dispatcherId    String
+  dispatcher      User   @relation("DispatcherToDeliveries", fields: [dispatcherId], references: [id])
+  
+  driverId        String?
+  driver          User?  @relation("DriverDeliveries", fields: [driverId], references: [id])
+
+  courierCompanyId String?
+  courierCompany   CourierCompany? @relation(fields: [courierCompanyId], references: [id])
+
+  truckId String?
+  truck   Truck?  @relation(fields: [truckId], references: [id])
+
+  shipmentId String?   @unique
+  shipment   Shipment? @relation(fields: [shipmentId], references: [id])
+
+  pickupLocation String
+  pickupLat      Float
+  pickupLng      Float
+  pickupTime     DateTime?
+
+  dropLocation String
+  dropLat      Float
+  dropLng      Float
+  dropTime     DateTime?
+  estimatedETA DateTime?
+
+  cargoType   String
+  cargoWeight Float
+  cargoVolumeLtrs Float
+  distanceKm  Float?
+  packageId   String  @unique
+
+  packageCount      Int       @default(1)
+  postalCode        String?
+  
+  timeWindowStart   DateTime?
+  timeWindowEnd     DateTime?
+
+  optimizedRouteId   String?
+  optimizedRoute     OptimizedRoute? @relation(fields: [optimizedRouteId], references: [id])
+  
+  distanceTraveled  Float?
+  carbonEmitted     Float?
+  baselineDistance  Float?
+
+  baseEarnings      Float @default(0.0)
+  marketplaceBonus  Float @default(0.0)
+  absorptionBonus   Float @default(0.0)
+  fuelSurcharge     Float @default(0.0)
+  totalEarnings     Float @default(0.0)
+
+  status DeliveryStatus @default(PENDING)
+
+  isMarketplaceLoad Boolean @default(false)
+  
+  absorptionTransferExport AbsorptionTransfer? @relation("ExportedDelivery")
+  absorptionTransferImport AbsorptionTransfer? @relation("ImportedDelivery")
+
+  createdAt   DateTime  @default(now())
+  completedAt DateTime?
+  updatedAt   DateTime  @updatedAt
+
+  transactions Transaction[]
+
+  @@index([postalCode, status])
+  @@index([courierCompanyId])
+  @@index([optimizedRouteId])
+  @@index([packageId])
+  @@index([dispatcherId])
+  @@index([driverId])
+  @@index([timeWindowStart, timeWindowEnd])
+}
+
+enum DeliveryStatus {
+  PENDING
+  ALLOCATED
+  EN_ROUTE_TO_PICKUP
+  CARGO_LOADED
+  IN_TRANSIT
+  ABSORPTION_PROPOSED
+  ABSORPTION_ACCEPTED
+  ABSORPTION_TRANSFERRED
+  EN_ROUTE_TO_DROP
+  AWAITING_CONFIRMATION
   COMPLETED
-  DISPUTED
+  CANCELLED
 }
 
-// ============================================
-// 5. SHIPMENT MODEL
-// ============================================
+model OptimizedRoute {
+  id                  String   @id @default(uuid())
+  
+  courierCompanyId    String
+  courierCompany      CourierCompany @relation(fields: [courierCompanyId], references: [id])
+  
+  truckId             String
+  truck               Truck    @relation(fields: [truckId], references: [id])
+  
+  driverId            String
+  driver              User     @relation("DriverOptimizedRoutes", fields: [driverId], references: [id])
+  
+  deliveries          Delivery[]
+  
+  routePolyline       String?
+  waypoints           Json?
+  
+  totalDistance       Float?         @default(0.0)
+  totalDuration       Float?         @default(0.0)
+  
+  estimatedStartTime  DateTime
+  estimatedEndTime    DateTime
+  
+  totalPackages       Int
+  totalWeight         Float
+  totalVolume         Float
+  utilizationPercent  Float
+  
+  baselineDistance    Float
+  carbonSaved         Float
+  emptyMilesSaved     Float
+  
+  isTSPOptimized      Boolean  @default(true)
+  
+  status              RouteStatus @default(PENDING)
+  
+  absorptionOpportunities1 AbsorptionOpportunity[] @relation("Route1")
+  absorptionOpportunities2 AbsorptionOpportunity[] @relation("Route2")
+  
+  startedAt           DateTime?
+  completedAt         DateTime?
+  
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+  
+  @@index([courierCompanyId, status])
+  @@index([truckId, status])
+  @@index([estimatedStartTime])
+  @@index([createdAt])
+}
+
+enum RouteStatus {
+  PENDING
+  ALLOCATED
+  ACTIVE
+  COMPLETED
+  CANCELLED
+}
+
+model AbsorptionOpportunity {
+  id                  String   @id @default(uuid())
+  
+  route1Id            String
+  route1              OptimizedRoute @relation("Route1", fields: [route1Id], references: [id])
+  
+  route2Id            String
+  route2              OptimizedRoute @relation("Route2", fields: [route2Id], references: [id])
+  
+  overlapDistanceKm   Float
+  overlapStartTime    DateTime
+  overlapEndTime      DateTime
+  
+  nearestHubId        String
+  nearestHub          VirtualHub @relation(fields: [nearestHubId], references: [id])
+  
+  overlapPolyline     String?
+  overlapCenterLat    Float
+  overlapCenterLng    Float
+  
+  estimatedMeetTime   DateTime
+  timeWindow          Int
+  
+  eligibleDeliveryIds String
+  
+  truck1DistanceBefore Float
+  truck1DistanceAfter  Float
+  truck2DistanceBefore Float
+  truck2DistanceAfter  Float
+  
+  totalDistanceSaved   Float
+  potentialCarbonSaved Float
+  
+  spaceRequiredVolume  Float
+  spaceRequiredWeight  Float
+  
+  truck1SpaceAvailable Float
+  truck2SpaceAvailable Float
+  
+  status              AbsorptionStatus @default(PENDING)
+  
+  proposedAt          DateTime @default(now())
+  expiresAt           DateTime
+  
+  acceptedByRoute1At  DateTime?
+  acceptedByRoute2At  DateTime?
+  
+  absorptionTransfer  AbsorptionTransfer?
+  
+  createdAt           DateTime @default(now())
+  
+  @@index([route1Id, status])
+  @@index([route2Id, status])
+  @@index([nearestHubId])
+  @@index([status, expiresAt])
+  @@index([overlapStartTime])
+}
+
+enum AbsorptionStatus {
+  PENDING
+  ACCEPTED_BY_ROUTE1
+  ACCEPTED_BY_ROUTE2
+  BOTH_ACCEPTED
+  REJECTED
+  EXPIRED
+  ACTIVE
+  COMPLETED
+  CANCELLED
+}
+
+model AbsorptionTransfer {
+  id                    String   @id @default(uuid())
+  
+  absorptionOpportunityId String  @unique
+  absorptionOpportunity AbsorptionOpportunity @relation(fields: [absorptionOpportunityId], references: [id])
+  
+  exporterDriverId      String
+  exporterDriver        User     @relation("ExporterDriver", fields: [exporterDriverId], references: [id])
+  
+  importerDriverId      String
+  importerDriver        User     @relation("ImporterDriver", fields: [importerDriverId], references: [id])
+  
+  hubId                 String
+  hub                   VirtualHub @relation(fields: [hubId], references: [id])
+  
+  deliveryIdsToTransfer String
+  
+  exportedDeliveryId    String?  @unique
+  exportedDelivery      Delivery? @relation("ExportedDelivery", fields: [exportedDeliveryId], references: [id])
+  
+  importedDeliveryId    String?  @unique
+  importedDelivery      Delivery? @relation("ImportedDelivery", fields: [importedDeliveryId], references: [id])
+  
+  qrCodeScanned         Boolean  @default(false)
+  qrCodeData            String?
+  scannedAt             DateTime?
+  
+  checklistData         Json?
+  
+  spaceAvailableExporter Float
+  spaceAvailableImporter Float
+  
+  distanceSavedKm       Float
+  carbonSavedKg         Float
+  
+  status                TransferStatus @default(PENDING)
+  
+  createdAt             DateTime @default(now())
+  completedAt           DateTime?
+  
+  @@index([exporterDriverId])
+  @@index([importerDriverId])
+  @@index([hubId])
+  @@index([status])
+}
+
+enum TransferStatus {
+  PENDING
+  QR_SCANNED
+  CHECKLIST_VERIFIED
+  IN_PROGRESS
+  COMPLETED
+  FAILED
+}
+
+model BackhaulPickup {
+  id              String   @id @default(uuid())
+  
+  truckId         String
+  truck           Truck    @relation(fields: [truckId], references: [id])
+  
+  driverId        String
+  driver          User     @relation(fields: [driverId], references: [id])
+  
+  shipperId       String
+  shipperName     String
+  shipperPhone    String
+  shipperLocation String
+  shipperLat      Float
+  shipperLng      Float
+  
+  destinationHubId String
+  destinationHub   VirtualHub @relation(fields: [destinationHubId], references: [id])
+  
+  packageCount    Int
+  totalWeight     Float
+  totalVolume     Float
+  
+  distanceKm      Float
+  carbonSavedKg   Float
+  
+  status          BackhaulStatus @default(PROPOSED)
+  
+  proposedAt      DateTime @default(now())
+  pickedUpAt      DateTime?
+  deliveredAt     DateTime?
+  
+  @@index([truckId, status])
+  @@index([driverId])
+  @@index([destinationHubId])
+}
+
+enum BackhaulStatus {
+  PROPOSED
+  ACCEPTED
+  EN_ROUTE_TO_PICKUP
+  PICKED_UP
+  DELIVERED
+  REJECTED
+}
+
 model Shipment {
   id        String @id @default(uuid())
   shipperId String
   shipper   User   @relation("ShipperToShipments", fields: [shipperId], references: [id])
-
-  dispatcherId         String?
-  dispatcher           User?     @relation("DispatcherApprovals", fields: [dispatcherId], references: [id])
-  dispatcherApprovedAt DateTime?
-  dispatcherRejectedAt DateTime?
-  rejectionReason      String?
 
   pickupLocation  String?
   pickupLat       Float?
@@ -188,6 +526,7 @@ model Shipment {
 
   cargoType           String?
   cargoWeight         Float?
+  cargoVolume         Float?
   specialInstructions String?
 
   estimatedPrice Float?
@@ -223,71 +562,57 @@ enum Priority {
   HIGH
 }
 
-// ============================================
-// 6. DELIVERY MODEL
-// ============================================
-model Delivery {
-  id       String @id @default(uuid())
-  driverId String
-  driver   User   @relation("DriverDeliveries", fields: [driverId], references: [id])
-
-  truckId String?
-  truck   Truck?  @relation(fields: [truckId], references: [id])
-
-  shipmentId String?   @unique
-  shipment   Shipment? @relation(fields: [shipmentId], references: [id])
-
-  pickupLocation String
-  pickupLat      Float
-  pickupLng      Float
-  pickupTime     DateTime?
-
-  dropLocation String
-  dropLat      Float
-  dropLng      Float
-  dropTime     DateTime?
-  estimatedETA DateTime?
-
-  cargoType   String
-  cargoWeight Float
-  distanceKm  Float
-  packageId   String?
-
-  // ✅ NEW: Earnings breakdown
-  baseEarnings      Float @default(0.0)
-  marketplaceBonus  Float @default(0.0)
-  absorptionBonus   Float @default(0.0)
-  fuelSurcharge     Float @default(0.0)
-  totalEarnings     Float @default(0.0)
-
-  status DeliveryStatus @default(PENDING)
-
-  relayNodeId String?
-  relayNode   RelayNode? @relation(fields: [relayNodeId], references: [id])
-
-  isMarketplaceLoad Boolean @default(false)
-
-  createdAt   DateTime  @default(now())
-  completedAt DateTime?
-  updatedAt   DateTime  @updatedAt
-
-  transactions Transaction[] // ✅ NEW
+model CarbonMetric {
+  id                  String   @id @default(uuid())
+  
+  courierCompanyId    String?
+  date                DateTime
+  
+  totalDeliveries     Int
+  totalOptimizedRoutes Int
+  totalAbsorptions    Int
+  totalBackhauls      Int
+  
+  baselineDistance    Float
+  actualDistance      Float
+  distanceSaved       Float
+  
+  baselineCarbon      Float
+  actualCarbon        Float
+  carbonSaved         Float
+  
+  emptyMilesPrevented Float
+  
+  avgUtilization      Float
+  
+  createdAt           DateTime @default(now())
+  
+  @@unique([courierCompanyId, date])
+  @@index([date])
+  @@index([courierCompanyId])
 }
 
-enum DeliveryStatus {
-  PENDING
-  EN_ROUTE_TO_PICKUP
-  CARGO_LOADED
-  IN_TRANSIT
-  EN_ROUTE_TO_DROP
-  AWAITING_CONFIRMATION
-  COMPLETED
-  CANCELLED
+model RouteCache {
+  id          String   @id @default(uuid())
+  
+  originLat   Float
+  originLng   Float
+  destLat     Float
+  destLng     Float
+  
+  distance    Float
+  duration    Int
+  polyline    String
+  
+  source      String   @default("google_maps")
+  expiresAt   DateTime
+  
+  createdAt   DateTime @default(now())
+  
+  @@unique([originLat, originLng, destLat, destLng])
+  @@index([expiresAt])
 }
 
-// ============================================
-// 7. TRANSACTION MODEL ✅ NEW
-// ============================================
 model Transaction {
   id          String          @id @default(uuid())
   driverId    String
@@ -295,28 +620,26 @@ model Transaction {
   deliveryId  String?
   delivery    Delivery?       @relation(fields: [deliveryId], references: [id])
 
-  amount      Float           // ₹3,200, ₹1,200, etc.
+  amount      Float
   type        TransactionType
   description String
-  route       String?         // "Mumbai → Pune"
+  route       String?
   
   createdAt   DateTime        @default(now())
 }
 
 enum TransactionType {
-  BASE_DELIVERY      // Regular delivery payment
-  MARKETPLACE_BONUS  // Extra money from marketplace cargo
-  ABSORPTION_BONUS   // Bonus for accepting handover
-  FUEL_SURCHARGE     // Fuel cost reimbursement
-  TOLL_REIMBURSEMENT // Toll expenses
-  PENALTY            // Late delivery, damage penalty
-  BONUS              // Performance bonus
-  ADJUSTMENT         // Manual corrections
+  BASE_DELIVERY
+  MARKETPLACE_BONUS
+  ABSORPTION_BONUS
+  FUEL_SURCHARGE
+  TOLL_REIMBURSEMENT
+  PENALTY
+  BONUS
+  ADJUSTMENT
+  BACKHAUL_BONUS
 }
 
-// ============================================
-// 8. NOTIFICATION MODEL
-// ============================================
 model Notification {
   id     String           @id @default(uuid())
   userId String
@@ -334,19 +657,20 @@ model Notification {
 enum NotificationType {
   DELIVERY_ASSIGNED
   ABSORPTION_AVAILABLE
+  ABSORPTION_ACCEPTED
+  ABSORPTION_COMPLETED
+  BACKHAUL_OPPORTUNITY
   DELIVERY_UPDATE
   ROUTE_UPDATE
   SYSTEM_ALERT
   GPS_VERIFIED
-  HANDOVER_COMPLETE
   SHIPMENT_APPROVED
   SHIPMENT_REJECTED
-  PAYMENT_PROCESSED  // ✅ NEW
+  PAYMENT_PROCESSED
+  REGISTRATION_APPROVED
+  REGISTRATION_REJECTED
 }
 
-// ============================================
-// 9. E-WAY BILL MODEL
-// ============================================
 model EWayBill {
   id         String    @id @default(uuid())
   billNo     String    @unique
@@ -371,13 +695,19 @@ enum EwbStatus {
   TRANSFERRED
 }
 
-// ============================================
-// 10. ACTIVITY LOG
-// ============================================
 model ActivityLog {
   id        String   @id @default(uuid())
   day       String
   requests  Int
   type      String
   createdAt DateTime @default(now())
+}
+
+model SystemConfig {
+  id          String   @id @default(uuid())
+  key         String   @unique
+  value       String
+  description String?
+  
+  updatedAt   DateTime @updatedAt
 }
