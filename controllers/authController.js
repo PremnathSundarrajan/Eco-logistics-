@@ -1,19 +1,28 @@
 const prisma = require('../config/database');
 const { generateAccessToken, refreshAccessToken } = require('../config/jwt');
-
 const Joi = require('joi');
+const twilio = require('twilio');
+const dotenv = require('dotenv');
+dotenv.config();  
+
+// Initialize Twilio client
+const client = twilio(
+  process.env.TWILIO_ACCOUNT_SID,
+  process.env.TWILIO_AUTH_TOKEN
+);
 
 
 /**
- * Send OTP to phone number (register/login)
+ * Send OTP via Twilio Verify
  */
 const sendOTP = async (req, res) => {
   try {
     const schema = Joi.object({
       phone: Joi.string().pattern(/^\+91\d{10}$/).required().messages({
-        'string.pattern.base': 'Phone must be +91xxxxxxxxxx format',
+        'string.pattern.base': 'Phone must be in +91XXXXXXXXXX format',
       }),
-      role: Joi.string().valid('DRIVER', 'SHIPPER', 'DISPATCHER').required(),
+      // Role is optional here as it might be an existing user logging in
+      role: Joi.string().valid('DRIVER', 'SHIPPER', 'DISPATCHER').default('DRIVER'),
     });
 
     const { error } = schema.validate(req.body);
@@ -24,55 +33,36 @@ const sendOTP = async (req, res) => {
       });
     }
 
-    const { phone, role } = req.body;
+    const { phone } = req.body;
 
-    // Check if user exists or create new
-    let user = await prisma.user.findUnique({
-      where: { phone },
-    });
-
-    if (!user) {
-      // Create new user
-      user = await prisma.user.create({
-        data: {
-          phone,
-          role,
-          name: `User_${phone.slice(-4)}`, // Temporary name
-        },
-      });
-    }
-
-    // Generate 6-digit OTP (DEV MODE - print to console)
-    const otp = Math.floor(100000 + Math.random() * 900000).toString();
-    console.log(`🧑‍💻 DEV OTP for ${phone}: ${otp}`);
-    console.log(`📱 In production: Send SMS to ${phone}`);
+    // Send verification code using Twilio Verify
+    await client.verify.v2.services(process.env.TWILIO_VERIFY_SERVICE_SID)
+      .verifications
+      .create({ to: phone, channel: 'sms' });
 
     res.status(200).json({
       success: true,
-      message: 'OTP sent successfully',
-      data: { 
-        phone: user.phone,
-        userId: user.id,
-        tempName: user.name 
-      },
+      message: 'OTP sent successfully via Twilio',
+      data: { phone },
     });
   } catch (error) {
     console.error('Send OTP error:', error);
     res.status(500).json({
       success: false,
-      message: 'Failed to send OTP',
+      message: error.message || 'Failed to send OTP',
     });
   }
 };
 
 /**
- * Verify OTP and issue JWT token
+ * Verify OTP using Twilio Verify and issue JWT token
  */
 const verifyOTP = async (req, res) => {
   try {
     const schema = Joi.object({
       phone: Joi.string().pattern(/^\+91\d{10}$/).required(),
       otp: Joi.string().length(6).required(),
+      role: Joi.string().valid('DRIVER', 'SHIPPER', 'DISPATCHER').optional(),
     });
 
     const { error } = schema.validate(req.body);
@@ -83,19 +73,22 @@ const verifyOTP = async (req, res) => {
       });
     }
 
-    const { phone, otp } = req.body;
+    const { phone, otp, role } = req.body;
 
-    // DEV MODE: Accept any 6-digit OTP
-    // PRODUCTION: Verify from Redis/SMS service
-    if (otp.length !== 6 || !/^\d{6}$/.test(otp)) {
+    // Verify code with Twilio
+    const verificationCheck = await client.verify.v2.services(process.env.TWILIO_VERIFY_SERVICE_SID)
+      .verificationChecks
+      .create({ to: phone, code: otp });
+
+    if (verificationCheck.status !== 'approved') {
       return res.status(400).json({
         success: false,
-        message: 'Invalid OTP format',
+        message: 'Invalid or expired OTP',
       });
     }
 
-    // Find user
-    const user = await prisma.user.findUnique({
+    // On successful verification, find or create the user
+    let user = await prisma.user.findUnique({
       where: { phone },
       include: {
         trucks: {
@@ -109,13 +102,18 @@ const verifyOTP = async (req, res) => {
     });
 
     if (!user) {
-      return res.status(404).json({
-        success: false,
-        message: 'Phone number not registered',
+      // Create new user if not found
+      user = await prisma.user.create({
+        data: {
+          phone,
+          role: role || 'DRIVER',
+          name: `User_${phone.slice(-4)}`,
+        },
+        include: { trucks: true },
       });
     }
 
-    // Generate JWT token
+    // Generate JWT token with userId
     const token = generateAccessToken({
       userId: user.id,
       role: user.role,
@@ -150,13 +148,11 @@ const verifyOTP = async (req, res) => {
     console.error('Verify OTP error:', error);
     res.status(500).json({
       success: false,
-      message: 'OTP verification failed',
+      message: error.message || 'OTP verification failed',
     });
   }
 };
 
-/**
- * Get authenticated user profile
 /**
  * GET /api/auth/profile - Get authenticated user profile (PROTECTED)
  */
@@ -258,14 +254,14 @@ const refreshToken = async (req, res) => {
     });
   } catch (error) {
     console.error('Refresh token error:', error.message);
-    
+
     if (error.message === 'Invalid refresh token') {
       return res.status(403).json({
         success: false,
         message: 'Invalid or expired refresh token',
       });
     }
-    
+
     res.status(500).json({
       success: false,
       message: 'Token refresh failed',

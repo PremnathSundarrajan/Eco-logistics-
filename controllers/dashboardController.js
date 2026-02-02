@@ -4,7 +4,6 @@ const prisma = new PrismaClient();
 exports.getStats = async (req, res) => {
     try {
         const pendingRequests = await prisma.shipment.count({ where: { status: 'PENDING' } });
-        // 'ACTIVE' is not in ShipmentStatus, using IN_TRANSIT and DISPATCHER_APPROVED as 'active'
         const activeShipments = await prisma.shipment.count({
             where: {
                 status: {
@@ -12,13 +11,38 @@ exports.getStats = async (req, res) => {
                 }
             }
         });
-        const activeDrivers = await prisma.user.count({ where: { role: 'DRIVER', status: 'ON_DUTY' } });
+        const activeDriversCount = await prisma.user.count({ where: { role: 'DRIVER', status: 'ON_DUTY' } });
+
+        // Fleet Capacity Analytics
+        const totalVehicles = await prisma.truck.count();
+
+        const totalCapacityResult = await prisma.truck.aggregate({
+            _sum: {
+                capacity: true
+            }
+        });
+
+        const activeCapacityResult = await prisma.truck.aggregate({
+            _sum: {
+                capacity: true
+            },
+            where: {
+                owner: {
+                    status: 'ON_DUTY'
+                }
+            }
+        });
 
         res.json({
             pendingRequests: pendingRequests.toString(),
             activeShipments: activeShipments.toString(),
-            activeDrivers: activeDrivers.toString(),
+            activeDrivers: activeDriversCount.toString(),
             fleetUtilization: "87%",
+            // New Fleet Capacity Stats
+            totalVehicles: totalVehicles,
+            totalCapacity: totalCapacityResult._sum.capacity || 0,
+            activeCapacity: activeCapacityResult._sum.capacity || 0,
+            unit: 'kg',
             trends: {
                 pendingRequests: "+8 today",
                 activeShipments: "+12 today",
@@ -27,6 +51,7 @@ exports.getStats = async (req, res) => {
             }
         });
     } catch (error) {
+        console.error('Get stats error:', error);
         res.status(500).json({ error: error.message });
     }
 };
@@ -52,7 +77,7 @@ exports.getActivity = async (req, res) => {
         // Group by day
         const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
         const counts = {};
-        
+
         // Initialize last 7 days
         for (let i = 6; i >= 0; i--) {
             const date = new Date();
@@ -143,7 +168,7 @@ exports.getRecentAbsorptions = async (req, res) => {
         // Get today's absorption opportunities
         const startOfDay = new Date();
         startOfDay.setHours(0, 0, 0, 0);
-        
+
         const endOfDay = new Date();
         endOfDay.setHours(23, 59, 59, 999);
 
