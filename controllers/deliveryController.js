@@ -440,11 +440,14 @@ const getUnassignedDeliveries = async (req, res) => {
         }
 
         const whereClause = {
-            courierCompanyId,
             status: 'PENDING',
             driverId: null,
             truckId: null,
             optimizedRouteId: null,
+            OR: [
+                { courierCompanyId: courierCompanyId },
+                { courierCompanyId: null }
+            ]
         };
 
         const [count, deliveries] = await Promise.all([
