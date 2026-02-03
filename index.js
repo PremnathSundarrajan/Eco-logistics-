@@ -19,7 +19,7 @@ const virtualHubRoutes = require('./routes/virtualHub');
 const SynergyMonitor = require('./services/synergyMonitor');
 
 
-dotenv.config();
+
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server, {
@@ -43,6 +43,7 @@ app.use(express.json({ limit: '10mb' }));
 app.get('/', (req, res) => {
     res.send('Logistics Backend API Working');
 });
+
 
 app.use('/api', apiRoutes);
 app.use('/api/auth', authRoutes);

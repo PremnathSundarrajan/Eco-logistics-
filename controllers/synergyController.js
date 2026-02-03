@@ -510,39 +510,93 @@ async function searchSynergy(req, res) {
 }
 
 async function acceptSynergy(req, res) {
+    // DEPRECATED: Driver acceptance is no longer allowed
+    // Only dispatcher can accept synergy opportunities
     try {
-        const { opportunityId, routeId } = req.body;
-
-        const opportunity = await prisma.absorptionOpportunity.findUnique({
-            where: { id: opportunityId }
-        });
-
-        if (!opportunity) {
-            return res.status(404).json({ message: 'Opportunity not found' });
-        }
-
-        let updateData = {};
-        if (opportunity.route1Id === routeId) {
-            updateData.status = opportunity.status === 'ACCEPTED_BY_ROUTE2' ? 'BOTH_ACCEPTED' : 'ACCEPTED_BY_ROUTE1';
-            updateData.acceptedByRoute1At = new Date();
-        } else if (opportunity.route2Id === routeId) {
-            updateData.status = opportunity.status === 'ACCEPTED_BY_ROUTE1' ? 'BOTH_ACCEPTED' : 'ACCEPTED_BY_ROUTE2';
-            updateData.acceptedByRoute2At = new Date();
-        } else {
-            return res.status(400).json({ message: 'Route ID does not match this opportunity' });
-        }
-
-        const updated = await prisma.absorptionOpportunity.update({
-            where: { id: opportunityId },
-            data: updateData
-        });
-
-        res.status(200).json({
-            success: true,
-            opportunity: updated
+        return res.status(403).json({
+            success: false,
+            message: 'Driver acceptance not allowed. Synergy opportunities are approved by dispatcher only. Please wait for dispatcher approval.',
+            deprecated: true
         });
     } catch (error) {
         res.status(500).json({ error: error.message });
+    }
+}
+
+/**
+ * Phase 2: Dispatcher Orchestration - Reject Synergy
+ * Dispatcher rejects the opportunity
+ */
+async function dispatcherRejectSynergy(req, res) {
+    try {
+        const { opportunityId, dispatcherId, reason } = req.body;
+        const io = req.app.get('io');
+
+        // Validate opportunity
+        const opportunity = await prisma.absorptionOpportunity.findUnique({
+            where: { id: opportunityId },
+            include: {
+                route1: {
+                    include: {
+                        truck: { include: { owner: true } }
+                    }
+                },
+                route2: {
+                    include: {
+                        truck: { include: { owner: true } }
+                    }
+                }
+            }
+        });
+
+        if (!opportunity) {
+            return res.status(404).json({
+                success: false,
+                message: 'Opportunity not found'
+            });
+        }
+
+        if (opportunity.status !== 'PENDING') {
+            return res.status(400).json({
+                success: false,
+                message: 'Opportunity already processed'
+            });
+        }
+
+        // Update opportunity status to REJECTED
+        await prisma.absorptionOpportunity.update({
+            where: { id: opportunityId },
+            data: {
+                status: 'REJECTED',
+                rejectedAt: new Date(),
+                rejectionReason: reason || 'Rejected by dispatcher'
+            }
+        });
+
+        // Notify both drivers
+        const rejectionData = {
+            opportunityId,
+            reason: reason || 'Rejected by dispatcher',
+            timestamp: new Date().toISOString()
+        };
+
+        io.to(`driver_${opportunity.route1.truck.owner.id}`).emit('SYNERGY_REJECTED', rejectionData);
+        io.to(`driver_${opportunity.route2.truck.owner.id}`).emit('SYNERGY_REJECTED', rejectionData);
+
+        res.status(200).json({
+            success: true,
+            message: 'Synergy opportunity rejected',
+            data: {
+                opportunityId,
+                status: 'REJECTED'
+            }
+        });
+    } catch (error) {
+        console.error('Dispatcher reject error:', error);
+        res.status(500).json({
+            success: false,
+            message: error.message || 'Failed to reject synergy'
+        });
     }
 }
 
@@ -558,13 +612,14 @@ async function handleHandshake(req, res) {
 }
 
 module.exports = {
-    // New Phase 2-4 functions
+    // Phase 2-4 functions
     dispatcherAcceptSynergy,
+    dispatcherRejectSynergy,
     generateQRCode,
     verifyQR,
     completeHandover,
 
-    // Legacy functions
+    // Legacy functions (deprecated)
     searchSynergy,
     acceptSynergy,
     handleHandshake

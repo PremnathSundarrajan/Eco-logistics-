@@ -7,6 +7,7 @@ router.use(authenticateToken);
 
 // Phase 2: Dispatcher Orchestration
 router.post('/dispatcher-accept', synergyController.dispatcherAcceptSynergy);
+router.post('/dispatcher-reject', synergyController.dispatcherRejectSynergy);
 
 // Phase 3: QR Generation & Verification
 router.post('/generate-qr', synergyController.generateQRCode);

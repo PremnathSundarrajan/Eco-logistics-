@@ -215,7 +215,7 @@ class SynergyMonitor {
                                 { route1Id: routeA.id, route2Id: routeB.id },
                                 { route1Id: routeB.id, route2Id: routeA.id }
                             ],
-                            status: { in: ['PENDING', 'ACCEPTED_BY_ROUTE1', 'ACCEPTED_BY_ROUTE2', 'BOTH_ACCEPTED'] },
+                            status: { in: ['PENDING', 'BOTH_ACCEPTED'] },
                             expiresAt: { gt: new Date() }
                         }
                     });
