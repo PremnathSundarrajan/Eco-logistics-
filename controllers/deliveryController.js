@@ -232,41 +232,46 @@ const completeDelivery = async (req, res) => {
             });
         }
 
-        // Update statuses and create transaction
-        const [updatedDelivery, updatedShipment, transaction] = await prisma.$transaction([
-            prisma.delivery.update({
-                where: { id },
-                data: {
-                    status: 'COMPLETED',
-                    completedAt: new Date(),
-                    dropTime: new Date(),
-                },
-            }),
-            prisma.shipment.update({
+        // Update delivery status
+        const updatedDelivery = await prisma.delivery.update({
+            where: { id },
+            data: {
+                status: 'COMPLETED',
+                completedAt: new Date(),
+                dropTime: new Date(),
+            },
+        });
+
+        // Update shipment if exists
+        if (delivery.shipmentId) {
+            await prisma.shipment.update({
                 where: { id: delivery.shipmentId },
                 data: { status: 'COMPLETED' },
-            }),
-            prisma.transaction.create({
-                data: {
-                    driverId: req.user.id,
-                    deliveryId: id,
-                    amount: delivery.totalEarnings || 0,
-                    type: 'BASE_DELIVERY',
-                    description: `Payment for delivery ${id}`,
-                    route: `${delivery.pickupLocation} → ${delivery.dropLocation}`,
-                },
-            }),
-            // Update driver's total earnings
-            prisma.user.update({
-                where: { id: req.user.id },
-                data: {
-                    totalEarnings: { increment: delivery.totalEarnings || 0 },
-                    weeklyEarnings: { increment: delivery.totalEarnings || 0 },
-                    deliveriesCount: { increment: 1 },
-                    totalDistanceKm: { increment: delivery.distanceKm || 0 },
-                },
-            }),
-        ]);
+            });
+        }
+
+        // Create transaction record
+        const transaction = await prisma.transaction.create({
+            data: {
+                driverId: req.user.id,
+                deliveryId: id,
+                amount: delivery.totalEarnings || 0,
+                type: 'BASE_DELIVERY',
+                description: `Payment for delivery ${id}`,
+                route: `${delivery.pickupLocation} → ${delivery.dropLocation}`,
+            },
+        });
+
+        // Update driver's total earnings
+        await prisma.user.update({
+            where: { id: req.user.id },
+            data: {
+                totalEarnings: { increment: delivery.totalEarnings || 0 },
+                weeklyEarnings: { increment: delivery.totalEarnings || 0 },
+                deliveriesCount: { increment: 1 },
+                totalDistanceKm: { increment: delivery.distanceKm || 0 },
+            },
+        });
 
         res.status(200).json({
             success: true,
