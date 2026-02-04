@@ -16,12 +16,13 @@ const backhaulRoutes = require('./routes/backhaul');
 const absorptionRoutes = require('./routes/absorption');
 const packagesRoutes = require('./routes/packages');
 const virtualHubRoutes = require('./routes/virtualHub');
+const ewayBillRoutes = require('./routes/ewayBill');
 const SynergyMonitor = require('./services/synergyMonitor');
 
 
 dotenv.config();
 const app = express();
-const server = http.createServer(app); 
+const server = http.createServer(app);
 const io = new Server(server, {
     cors: {
         origin: "*",
@@ -57,6 +58,7 @@ app.use('/api/backhaul', backhaulRoutes);
 app.use('/api/absorption', absorptionRoutes);
 app.use('/api/packages', packagesRoutes);
 app.use('/api/virtual-hubs', virtualHubRoutes);
+app.use('/api/eway-bill', ewayBillRoutes);
 
 
 

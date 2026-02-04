@@ -88,6 +88,7 @@ model CourierCompany {
   
   adminEmail  String?
   adminPhone  String?
+  gstin       String? // Added for e-Way Bill support
   
   drivers     User[]
   trucks      Truck[]
@@ -96,6 +97,20 @@ model CourierCompany {
   
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
+}
+//customer table created 
+model Customer {
+  id        String   @id @default(uuid())
+  name      String
+  gstin     String   @unique
+  phone     String?
+  address   String?
+  email     String?
+  
+  shipments Shipment[]
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 model Truck {
@@ -113,6 +128,8 @@ model Truck {
 
   courierCompanyId String?
   courierCompany   CourierCompany? @relation(fields: [courierCompanyId], references: [id])
+
+  gstin        String? // Added for e-Way Bill support
 
   currentLat Float?
   currentLng Float?
@@ -537,6 +554,9 @@ model Shipment {
   priority Priority       @default(LOW)
 
   isMarketplaceLoad Boolean @default(false)
+
+  recipientId String?
+  recipient   Customer? @relation(fields: [recipientId], references: [id])
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
