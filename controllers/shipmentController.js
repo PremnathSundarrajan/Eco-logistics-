@@ -17,7 +17,7 @@ const createShipment = async (req, res) => {
       dropLng: Joi.number().required(),
       dropLocation: Joi.string().max(200).required(),
       cargoType: Joi.string().valid(
-        'Electronics', 'Industrial Machinery', 'Textiles', 
+        'Electronics', 'Industrial Machinery', 'Textiles',
         'Automotive Parts', 'FMCG Products', 'Pharmaceuticals',
         'Steel & Metal', 'Agricultural Products', 'Furniture'
       ).required(),
@@ -270,16 +270,130 @@ const cancelShipment = async (req, res) => {
   }
 };
 
+/**
+ * GET /api/shipments/pending - Get all pending shipments for drivers
+ */
+const getPendingShipments = async (req, res) => {
+  try {
+    const shipments = await prisma.shipment.findMany({
+      where: {
+        status: 'PENDING',
+      },
+      orderBy: { createdAt: 'desc' },
+      include: {
+        shipper: {
+          select: { name: true, phone: true }
+        }
+      },
+      take: 20,
+    });
+
+    res.status(200).json({
+      success: true,
+      data: shipments,
+      count: shipments.length,
+    });
+  } catch (error) {
+    console.error('Get pending shipments error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch pending shipments',
+    });
+  }
+};
+
+/**
+ * POST /api/shipments/:id/accept - Driver accepts a shipment
+ */
+const acceptShipment = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const driverId = req.user.id;
+
+    const shipment = await prisma.shipment.findUnique({
+      where: { id },
+    });
+
+    if (!shipment) {
+      return res.status(404).json({
+        success: false,
+        message: 'Shipment not found',
+      });
+    }
+
+    if (shipment.status !== 'PENDING') {
+      return res.status(400).json({
+        success: false,
+        message: 'Shipment already assigned',
+      });
+    }
+
+    // Get driver's truck
+    const truck = await prisma.truck.findFirst({
+      where: { driverId },
+    });
+
+    if (!truck) {
+      return res.status(400).json({
+        success: false,
+        message: 'No truck assigned to driver',
+      });
+    }
+
+    // Create delivery and update shipment in transaction
+    const result = await prisma.$transaction(async (tx) => {
+      // Update shipment status
+      const updatedShipment = await tx.shipment.update({
+        where: { id },
+        data: { status: 'ASSIGNED' },
+      });
+
+      // Create delivery record
+      const delivery = await tx.delivery.create({
+        data: {
+          driverId,
+          truckId: truck.id,
+          shipmentId: id,
+          pickupLocation: shipment.pickupLocation,
+          pickupLat: shipment.pickupLat,
+          pickupLng: shipment.pickupLng,
+          dropLocation: shipment.dropLocation,
+          dropLat: shipment.dropLat,
+          dropLng: shipment.dropLng,
+          cargoType: shipment.cargoType,
+          cargoWeight: shipment.cargoWeight,
+          status: 'ALLOCATED',
+          estimatedPrice: shipment.estimatedPrice || 0,
+        },
+      });
+
+      return { shipment: updatedShipment, delivery };
+    });
+
+    res.status(200).json({
+      success: true,
+      message: 'Shipment accepted! Check your deliveries.',
+      data: result,
+    });
+  } catch (error) {
+    console.error('Accept shipment error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to accept shipment',
+    });
+  }
+};
+
 // Helper functions
 const calculateDistance = (point1, point2) => {
   const R = 6371; // Earth's radius in km
   const dLat = (point2.lat - point1.lat) * Math.PI / 180;
   const dLng = (point2.lng - point1.lng) * Math.PI / 180;
-  const a = 
-    Math.sin(dLat/2) * Math.sin(dLat/2) +
-    Math.cos(point1.lat * Math.PI / 180) * Math.cos(point2.lat * Math.PI / 180) * 
-    Math.sin(dLng/2) * Math.sin(dLng/2);
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(point1.lat * Math.PI / 180) * Math.cos(point2.lat * Math.PI / 180) *
+    Math.sin(dLng / 2) * Math.sin(dLng / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
   return Math.round(R * c);
 };
 
@@ -294,4 +408,6 @@ module.exports = {
   getMyShipments,
   getShipment,
   cancelShipment,
+  getPendingShipments,
+  acceptShipment,
 };
