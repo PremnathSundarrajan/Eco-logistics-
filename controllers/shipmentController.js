@@ -140,6 +140,9 @@ const getMyShipments = async (req, res) => {
           include: {
             driver: {
               select: { name: true, rating: true, phone: true }
+            },
+            truck: {
+              select: { licensePlate: true, model: true }
             }
           }
         }
@@ -180,7 +183,7 @@ const getShipment = async (req, res) => {
         delivery: {
           include: {
             driver: {
-              select: { name: true, rating: true }
+              select: { name: true, rating: true, phone: true }
             },
             truck: {
               select: { licensePlate: true, model: true }
