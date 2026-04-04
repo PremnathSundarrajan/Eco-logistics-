@@ -18,6 +18,7 @@ const packagesRoutes = require('./routes/packages');
 const virtualHubRoutes = require('./routes/virtualHub');
 const ewayBillRoutes = require('./routes/ewayBill');
 const SynergyMonitor = require('./services/synergyMonitor');
+const carbonOptimizer = require('./routes/carbonOptimizer');
 
 
 dotenv.config();
@@ -59,7 +60,7 @@ app.use('/api/absorption', absorptionRoutes);
 app.use('/api/packages', packagesRoutes);
 app.use('/api/virtual-hubs', virtualHubRoutes);
 app.use('/api/eway-bill', ewayBillRoutes);
-
+app.use('/api', carbonOptimizer);
 
 
 // Socket.io connection logic
