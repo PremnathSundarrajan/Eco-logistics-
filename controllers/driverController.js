@@ -114,7 +114,7 @@ exports.createDriver = async (req, res) => {
             error: error.message 
         });
     }
-};
+}
 
 exports.updateDriver = async (req, res) => {
     try {
