@@ -59,7 +59,6 @@ exports.getDriverById = async (req, res) => {
 
 exports.createDriver = async (req, res) => {
     try {
-        // 1. Extract variables from the request body
         const { 
             name, 
             phone, 
@@ -71,7 +70,6 @@ exports.createDriver = async (req, res) => {
             status 
         } = req.body;
 
-        // 2. Validate required fields
         if (!name || !currentVehicleNo) {
             return res.status(400).json({ 
                 success: false,
@@ -79,19 +77,18 @@ exports.createDriver = async (req, res) => {
             });
         }
 
-        // 3. Create the user
         const driver = await prisma.user.create({
             data: {
                 name: name,
                 phone: phone || "",
-                licensePlate: currentVehicleNo, // Map frontend plate to backend licensePlate
+                licensePlate: currentVehicleNo, 
                 type: vehicleType || "Standard", 
                 role: role || "DRIVER",
                 model: "Not Specified",
                 capacity: 1000,
                 maxWeight: 1000,
                 maxVolume: 500,
-                warehouseId: "1", // Or use a dynamic value if your frontend adds it
+                warehouseId: "1", 
                 status: status || "ON_DUTY"
             }
         });
@@ -104,7 +101,6 @@ exports.createDriver = async (req, res) => {
     } catch (error) {
         console.error("Error creating driver:", error);
         
-        // Handle unique constraint failures (like duplicate license plates)
         if (error.code === 'P2002') {
             return res.status(400).json({ 
                 success: false,
