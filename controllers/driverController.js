@@ -34,19 +34,24 @@ exports.getDriverById = async (req, res) => {
 // Create a new Driver
 exports.createDriver = async (req, res) => {
     try {
-        const {
-            name,
-            phone,
-            vehicleType,
-            currentVehicleNo,
-            homeBaseCity,
-            avatarColor,
-            initials,
-            status
-        } = req.body;
+        const body = req.body;
+
+        // Accept various name field keys the frontend might send
+        const name = body.name || body.driverName || body.fullName || body.driver_name;
+        const phone = body.phone || body.phoneNumber || body.mobile;
+        const vehicleType = body.vehicleType || body.vehicle_type || body.type;
+        const currentVehicleNo = body.currentVehicleNo || body.licensePlate || body.vehiclePlate || body.plate;
+        const homeBaseCity = body.homeBaseCity || body.city || body.location;
+        const avatarColor = body.avatarColor || body.color;
+        const initials = body.initials;
+        const status = body.status;
 
         if (!name) {
-            return res.status(400).json({ message: "Name is required." });
+            return res.status(400).json({
+                message: "Name is required.",
+                hint: "Send 'name', 'driverName', or 'fullName' in the request body.",
+                receivedFields: Object.keys(body)  // shows what fields were actually sent
+            });
         }
 
         // phone is required+unique in DB — generate a placeholder if not provided
