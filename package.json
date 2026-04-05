@@ -21,7 +21,7 @@
   },
   "homepage": "https://gitlab.com/premnathsundarrajan4/backend-dm#readme",
   "dependencies": {
-    "@prisma/client": "6.19.0",
+    "@prisma/client": "^6.19.0",
     "archiver": "^7.0.1",
     "axios": "^1.13.4",
     "bcryptjs": "^3.0.3",
@@ -30,7 +30,7 @@
     "express": "^5.2.1",
     "joi": "^18.0.2",
     "jsonwebtoken": "^9.0.3",
-    "prisma": "6.19.0",
+    "prisma": "^6.19.0",
     "puppeteer": "^24.36.1",
     "qrcode": "^1.5.4",
     "socket.io": "^4.8.3",

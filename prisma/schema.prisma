@@ -80,24 +80,27 @@
     SUSPENDED
   }
 
-  model CourierCompany {
-    id          String  @id @default(uuid())
-    name        String  @unique
-    code        String  @unique
-    isActive    Boolean @default(true)
-    
-    adminEmail  String?
-    adminPhone  String?
-    gstin       String? // Added for e-Way Bill support
-    
-    drivers     User[]
-    trucks      Truck[]
-    deliveries  Delivery[]
-    routes      OptimizedRoute[]
-    
-    createdAt   DateTime @default(now())
-    updatedAt   DateTime @updatedAt
-  }
+model CourierCompany {
+  id          String  @id @default(uuid())
+  name        String  @unique
+  code        String  @unique
+  isActive    Boolean @default(true)
+  
+  adminEmail  String?
+  adminPhone  String?
+  gstin       String?
+
+  drivers     User[]
+  trucks      Truck[]
+  deliveries  Delivery[]
+  routes      OptimizedRoute[]
+
+  // ✅ NEW
+  warehouses  Warehouse[]
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
   //customer table created 
   model Customer {
     id        String   @id @default(uuid())
@@ -112,57 +115,57 @@
     createdAt DateTime @default(now())
     updatedAt DateTime @updatedAt
   }
+model Truck {
+  id           String @id @default(uuid())
+  licensePlate String @unique
+  model        String?
+  type         String?
+  capacity     Float?
+  fuelLevel    Float?
+  mileage      Float?
+  nextService  Float?
 
-  model Truck {
-    id           String @id @default(uuid())
-    licensePlate String @unique
-    model        String?
-    type         String?
-    capacity     Float?
-    fuelLevel    Float?
-    mileage      Float?
-    nextService  Float?
+  ownerId String
+  owner   User   @relation(fields: [ownerId], references: [id])
 
-    ownerId String
-    owner   User   @relation(fields: [ownerId], references: [id])
+  courierCompanyId String?
+  courierCompany   CourierCompany? @relation(fields: [courierCompanyId], references: [id])
 
-    courierCompanyId String?
-    courierCompany   CourierCompany? @relation(fields: [courierCompanyId], references: [id])
+  // ✅ NEW (OPTIONAL for migration safety)
+  warehouseId String?
+  warehouse   Warehouse? @relation(fields: [warehouseId], references: [id])
 
-    gstin        String? // Added for e-Way Bill support
+  gstin        String?
 
-    currentLat Float?
-    currentLng Float?
+  currentLat Float?
+  currentLng Float?
 
-    maxWeight           Float
-    maxVolume           Float
-    currentWeight       Float @default(0.0)
-    currentVolume       Float @default(0.0)
-    fuelType            FuelType?
-    co2PerKm            Float?
-    fuelConsumption     Float?
-    isAvailable         Boolean  @default(true)
-    
-    registrationStatus  RegistrationStatus @default(PENDING)
-    registeredAt        DateTime?
-    
-    sourceHubId         String?
-    sourceHub           VirtualHub? @relation("TruckSourceHub", fields: [sourceHubId], references: [id])
+  maxWeight           Float
+  maxVolume           Float
+  currentWeight       Float @default(0.0)
+  currentVolume       Float @default(0.0)
+  fuelType            FuelType?
+  co2PerKm            Float?
+  fuelConsumption     Float?
+  isAvailable         Boolean  @default(true)
+  
+  registrationStatus  RegistrationStatus @default(PENDING)
+  registeredAt        DateTime?
+  
+  sourceHubId         String?
+  sourceHub           VirtualHub? @relation("TruckSourceHub", fields: [sourceHubId], references: [id])
 
-    deliveries          Delivery[]
-    optimizedRoutes     OptimizedRoute[]
-    gpsLogs             GPSLog[]
-    backhaulPickups     BackhaulPickup[]
+  deliveries          Delivery[]
+  optimizedRoutes     OptimizedRoute[]
+  gpsLogs             GPSLog[]
+  backhaulPickups     BackhaulPickup[]
 
-    createdAt DateTime @default(now())
-    updatedAt DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-    @@index([ownerId, isAvailable])
-    @@index([courierCompanyId, registrationStatus])
-    @@index([currentLat, currentLng])
-    @@index([sourceHubId])
-  }
-
+  @@index([warehouseId])
+  @@index([ownerId, isAvailable])
+}
   enum FuelType {
     PETROL
     DIESEL
@@ -296,57 +299,64 @@
     CANCELLED
   }
 
-  model OptimizedRoute {
-    id                  String   @id @default(uuid())
+model OptimizedRoute {
+  id                  String   @id @default(uuid())
     
-    courierCompanyId    String
-    courierCompany      CourierCompany @relation(fields: [courierCompanyId], references: [id])
+  courierCompanyId    String
+  courierCompany      CourierCompany @relation(fields: [courierCompanyId], references: [id])
     
-    truckId             String
-    truck               Truck    @relation(fields: [truckId], references: [id])
+  truckId             String
+  truck               Truck    @relation(fields: [truckId], references: [id])
     
-    driverId            String
-    driver              User     @relation("DriverOptimizedRoutes", fields: [driverId], references: [id])
-    
-    deliveries          Delivery[]
-    
-    routePolyline       String?
-    waypoints           Json?
-    
-    totalDistance       Float?         @default(0.0)
-    totalDuration       Float?         @default(0.0)
-    
-    estimatedStartTime  DateTime
-    estimatedEndTime    DateTime
-    
-    totalPackages       Int
-    totalWeight         Float
-    totalVolume         Float
-    utilizationPercent  Float
-    
-    baselineDistance    Float
-    carbonSaved         Float
-    emptyMilesSaved     Float
-    
-    isTSPOptimized      Boolean  @default(true)
-    
-    status              RouteStatus @default(PENDING)
-    
-    absorptionOpportunities1 AbsorptionOpportunity[] @relation("Route1")
-    absorptionOpportunities2 AbsorptionOpportunity[] @relation("Route2")
-    
-    startedAt           DateTime?
-    completedAt         DateTime?
-    
-    createdAt           DateTime @default(now())
-    updatedAt           DateTime @updatedAt
-    
-    @@index([courierCompanyId, status])
-    @@index([truckId, status])
-    @@index([estimatedStartTime])
-    @@index([createdAt])
-  }
+  driverId            String
+  driver              User     @relation("DriverOptimizedRoutes", fields: [driverId], references: [id])
 
+  // ✅ NEW (OPTIONAL for migration safety)
+  warehouseId String?
+  warehouse   Warehouse? @relation(fields: [warehouseId], references: [id])
+
+  // ✅ DEPOT START/END (OPTIONAL now)
+  startLat Float?
+  startLng Float?
+  endLat   Float?
+  endLng   Float?
+    
+  deliveries          Delivery[]
+    
+  routePolyline       String?
+  waypoints           Json?
+    
+  totalDistance       Float? @default(0.0)
+  totalDuration       Float? @default(0.0)
+    
+  estimatedStartTime  DateTime
+  estimatedEndTime    DateTime
+    
+  totalPackages       Int
+  totalWeight         Float
+  totalVolume         Float
+  utilizationPercent  Float
+    
+  baselineDistance    Float
+  carbonSaved         Float
+  emptyMilesSaved     Float
+    
+  isTSPOptimized      Boolean  @default(true)
+    
+  status              RouteStatus @default(PENDING)
+    
+  absorptionOpportunities1 AbsorptionOpportunity[] @relation("Route1")
+  absorptionOpportunities2 AbsorptionOpportunity[] @relation("Route2")
+    
+  startedAt           DateTime?
+  completedAt         DateTime?
+    
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+    
+  @@index([warehouseId])
+  @@index([courierCompanyId, status])
+}
   enum RouteStatus {
     PENDING
     ALLOCATED
@@ -732,3 +742,29 @@
     
     updatedAt   DateTime @updatedAt
   }
+
+  // ================= NEW MODEL =================
+
+model Warehouse {
+  id        String   @id @default(uuid())
+  name      String
+  address   String?
+
+  latitude  Float
+  longitude Float
+
+  adminEmail String?
+  adminPhone String?
+
+  courierCompanyId String
+  courierCompany   CourierCompany @relation(fields: [courierCompanyId], references: [id])
+
+  trucks   Truck[]
+  routes   OptimizedRoute[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([courierCompanyId])
+  @@index([latitude, longitude])
+}

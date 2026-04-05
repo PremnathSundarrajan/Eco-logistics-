@@ -19,6 +19,10 @@ const virtualHubRoutes = require('./routes/virtualHub');
 const ewayBillRoutes = require('./routes/ewayBill');
 const SynergyMonitor = require('./services/synergyMonitor');
 const carbonOptimizer = require('./routes/carbonOptimizer');
+// Import the routes file you created above
+const warehouseRoutes = require('./routes/warehouseRoutes');
+
+// Mount the route to match what the React apiClient expects
 
 
 dotenv.config();
@@ -61,7 +65,7 @@ app.use('/api/packages', packagesRoutes);
 app.use('/api/virtual-hubs', virtualHubRoutes);
 app.use('/api/eway-bill', ewayBillRoutes);
 app.use('/api', carbonOptimizer);
-
+app.use('/api/warehouses', warehouseRoutes);
 
 // Socket.io connection logic
 io.on('connection', (socket) => {

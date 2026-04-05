@@ -20,7 +20,8 @@ exports.getAllDrivers = async (req, res) => {
                 ]
             },
             include: {
-                trucks: true
+                trucks: true,
+        
             }
         });
 

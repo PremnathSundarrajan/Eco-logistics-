@@ -1,0 +1,62 @@
+// routes/warehouseRoutes.js
+const express = require('express');
+const router = express.Router();
+const { PrismaClient } = require('@prisma/client');
+const prisma = new PrismaClient();
+
+// 1. GET all warehouses (Powers the Map UI and Solver)
+router.get('/', async (req, res) => {
+  try {
+    const warehouses = await prisma.warehouse.findMany();
+    res.json({ success: true, data: warehouses });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// 2. POST create a new warehouse (Called from the "Add Node" Admin Map Form)
+router.post('/', async (req, res) => {
+  try {
+    // Destructure all the fields the React Admin form sends
+    const { 
+        name, 
+        address, 
+        latitude, 
+        longitude, 
+        courierCompanyId, 
+        adminEmail, 
+        adminPhone 
+    } = req.body;
+
+    const newWarehouse = await prisma.warehouse.create({
+      data: {
+        name,
+        address,
+        latitude: parseFloat(latitude),
+        longitude: parseFloat(longitude),
+        courierCompanyId,
+        adminEmail,
+        adminPhone
+      }
+    });
+    
+    res.json({ success: true, data: newWarehouse });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// 3. DELETE a warehouse (Called when clicking the Trash icon on the map)
+router.delete('/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    await prisma.warehouse.delete({
+      where: { id: id } // Ensure your DB uses strings for IDs (UUID), otherwise parse to int
+    });
+    res.json({ success: true, message: 'Warehouse permanently deleted' });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+module.exports = router;
