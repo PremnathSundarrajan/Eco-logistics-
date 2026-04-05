@@ -31,23 +31,49 @@ exports.getDriverById = async (req, res) => {
     }
 };
 
-// Create a pristine genuine Driver (Requires 'name')
+// Create a new Driver
 exports.createDriver = async (req, res) => {
     try {
-        // We unpack the body. If your existing AddDriver form sends specific fields, they are passed here.
-        const driverData = req.body;
+        const {
+            name,
+            phone,
+            vehicleType,
+            currentVehicleNo,
+            homeBaseCity,
+            avatarColor,
+            initials,
+            status
+        } = req.body;
 
-        // Create the user explicitly as a DRIVER
+        if (!name) {
+            return res.status(400).json({ message: "Name is required." });
+        }
+
+        // phone is required+unique in DB — generate a placeholder if not provided
+        const uniquePhone = phone && phone.trim() !== ""
+            ? phone.trim()
+            : `unset_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+
         const newDriver = await prisma.user.create({
             data: {
-                ...driverData,
-                role: 'DRIVER'
+                name,
+                phone: uniquePhone,
+                role: 'DRIVER',
+                vehicleType: vehicleType || null,
+                currentVehicleNo: currentVehicleNo || null,
+                homeBaseCity: homeBaseCity || null,
+                avatarColor: avatarColor || null,
+                initials: initials || null,
+                status: status || 'ON_DUTY'
             }
         });
 
         res.status(201).json(newDriver);
     } catch (err) {
         console.error("Create Driver Error:", err);
+        if (err.code === 'P2002') {
+            return res.status(400).json({ message: "A driver with this phone number already exists." });
+        }
         res.status(500).json({ message: "Failed to create driver.", error: err.message });
     }
 };
