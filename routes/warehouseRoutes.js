@@ -17,27 +17,28 @@ router.get('/', async (req, res) => {
 // 2. POST create a new warehouse (Called from the "Add Node" Admin Map Form)
 router.post('/', async (req, res) => {
   try {
-    // Destructure all the fields the React Admin form sends
     const { 
-        name, 
-        address, 
-        latitude, 
-        longitude, 
-        courierCompanyId, 
-        adminEmail, 
-        adminPhone 
+        name, address, latitude, longitude, 
+        courierCompanyId, adminEmail, adminPhone 
     } = req.body;
 
-    const newWarehouse = await prisma.warehouse.create({
-      data: {
+    // Create a base payload
+    const dataPayload = {
         name,
         address,
         latitude: parseFloat(latitude),
         longitude: parseFloat(longitude),
-        courierCompanyId,
         adminEmail,
         adminPhone
-      }
+    };
+
+    // ONLY attach courierCompanyId if it was actually provided and exists
+    if (courierCompanyId) {
+        dataPayload.courierCompanyId = courierCompanyId;
+    }
+
+    const newWarehouse = await prisma.warehouse.create({
+      data: dataPayload
     });
     
     res.json({ success: true, data: newWarehouse });
