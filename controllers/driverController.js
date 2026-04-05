@@ -61,12 +61,43 @@ exports.getDriverById = async (req, res) => {
 exports.createDriver = async (req, res) => {
     try {
         const driver = await prisma.user.create({
-            data: { ...req.body, role: 'DRIVER' }
+                data: {
+                    name: name,
+                    phone: phone || "",
+                    licensePlate: currentVehicleNo, // Mapping frontend to backend schema
+                    type: vehicleType || "Standard", 
+                    role: role || "DRIVER",
+                    model: "Not Specified",
+                    capacity: 1000,
+                    maxWeight: 1000,
+                    maxVolume: 500,
+                    warehouseId: "1", 
+                    status: status || "ON_DUTY"
+                }
         });
-        res.status(201).json(driver);
+            return res.status(201).json({
+                success: true,
+                message: "Driver created successfully",
+                driver
+            });
     } catch (error) {
         res.status(500).json({ error: error.message });
     }
+        console.error("Error creating driver:", error);
+    
+        // Handle unique constraint failures (like duplicate license plates)
+        if (error.code === 'P2002') {
+            return res.status(400).json({ 
+                success: false,
+                message: "A driver with this information (possibly license plate or phone) already exists." 
+            });
+        }
+        return res.status(500).json({ 
+            success: false,
+            message: "Failed to create driver", 
+            error: error.message 
+        });
+    };
 };
 
 exports.updateDriver = async (req, res) => {

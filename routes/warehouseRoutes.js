@@ -24,7 +24,6 @@ router.post("/", async (req, res) => {
       address,
       latitude,
       longitude,
-      courierCompanyId,
       adminEmail,
       adminPhone,
     } = req.body;
