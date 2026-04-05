@@ -1,13 +1,13 @@
 // routes/warehouseRoutes.js
-const express = require('express');
+const express = require("express");
 const router = express.Router();
 
-const { PrismaClient } = require('@prisma/client');
+const { PrismaClient } = require("@prisma/client");
 const prisma = new PrismaClient();
-const { getDhsCourierId } = require('../utils/db_helpers');
+const { getDhsCourierId } = require("../utils/db_helpers");
 
 // 1. GET all warehouses (Powers the Map UI and Solver)
-router.get('/', async (req, res) => {
+router.get("/", async (req, res) => {
   try {
     const warehouses = await prisma.warehouse.findMany();
     res.json({ success: true, data: warehouses });
@@ -17,11 +17,16 @@ router.get('/', async (req, res) => {
 });
 
 // 2. POST create a new warehouse (Called from the "Add Node" Admin Map Form)
-router.post('/', async (req, res) => {
+router.post("/", async (req, res) => {
   try {
-    const { 
-        name, address, latitude, longitude, 
-        courierCompanyId, adminEmail, adminPhone 
+    const {
+      name,
+      address,
+      latitude,
+      longitude,
+      courierCompanyId,
+      adminEmail,
+      adminPhone,
     } = req.body;
 
     // Single-tenant fallback logic
@@ -35,19 +40,19 @@ router.post('/', async (req, res) => {
     }
 
     const dataPayload = {
-        name,
-        address,
-        latitude: parseFloat(latitude),
-        longitude: parseFloat(longitude),
-        adminEmail,
-        adminPhone,
-        courierCompanyId: validCompanyId
+      name,
+      address,
+      latitude: parseFloat(latitude),
+      longitude: parseFloat(longitude),
+      adminEmail,
+      adminPhone,
+      courierCompanyId: validCompanyId,
     };
 
     const newWarehouse = await prisma.warehouse.create({
-      data: dataPayload
+      data: dataPayload,
     });
-    
+
     res.json({ success: true, data: newWarehouse });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
@@ -55,13 +60,13 @@ router.post('/', async (req, res) => {
 });
 
 // 3. DELETE a warehouse (Called when clicking the Trash icon on the map)
-router.delete('/:id', async (req, res) => {
+router.delete("/:id", async (req, res) => {
   try {
     const { id } = req.params;
     await prisma.warehouse.delete({
-      where: { id: id } // Ensure your DB uses strings for IDs (UUID), otherwise parse to int
+      where: { id: id }, // Ensure your DB uses strings for IDs (UUID), otherwise parse to int
     });
-    res.json({ success: true, message: 'Warehouse permanently deleted' });
+    res.json({ success: true, message: "Warehouse permanently deleted" });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }
