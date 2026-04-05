@@ -1,8 +1,10 @@
 // routes/warehouseRoutes.js
 const express = require('express');
 const router = express.Router();
+
 const { PrismaClient } = require('@prisma/client');
 const prisma = new PrismaClient();
+const { getDhsCourierId } = require('../utils/db_helpers');
 
 // 1. GET all warehouses (Powers the Map UI and Solver)
 router.get('/', async (req, res) => {
@@ -22,20 +24,25 @@ router.post('/', async (req, res) => {
         courierCompanyId, adminEmail, adminPhone 
     } = req.body;
 
-    // Create a base payload
+    // Single-tenant fallback logic
+    let validCompanyId = courierCompanyId;
+    if (!validCompanyId) {
+      try {
+        validCompanyId = await getDhsCourierId();
+      } catch (err) {
+        return res.status(500).json({ success: false, error: err.message });
+      }
+    }
+
     const dataPayload = {
         name,
         address,
         latitude: parseFloat(latitude),
         longitude: parseFloat(longitude),
         adminEmail,
-        adminPhone
+        adminPhone,
+        courierCompanyId: validCompanyId
     };
-
-    // ONLY attach courierCompanyId if it was actually provided and exists
-    if (courierCompanyId) {
-        dataPayload.courierCompanyId = courierCompanyId;
-    }
 
     const newWarehouse = await prisma.warehouse.create({
       data: dataPayload

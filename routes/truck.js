@@ -4,6 +4,52 @@ const truckController = require('../controllers/truckController');
 const { authenticateToken } = require('../middleware/auth');
 const { PrismaClient } = require('@prisma/client');
 const prisma = new PrismaClient();
+const { getDhsCourierId } = require('../utils/db_helpers');
+
+// POST create a new truck (Single-tenant fallback logic)
+router.post('/', async (req, res) => {
+  try {
+    const {
+      licensePlate, model, type, capacity, maxWeight, maxVolume,
+      warehouseId, courierCompanyId, ownerId
+    } = req.body;
+
+    // Single-tenant fallback logic
+    let validCompanyId = courierCompanyId;
+    if (!validCompanyId) {
+      try {
+        validCompanyId = await getDhsCourierId();
+      } catch (err) {
+        return res.status(500).json({ success: false, error: err.message });
+      }
+    }
+
+    // Owner fallback: if not provided, try to find an ADMIN user
+    let validOwnerId = ownerId;
+    if (!validOwnerId) {
+      const user = await prisma.user.findFirst({ where: { role: 'ADMIN' } }) || await prisma.user.findFirst();
+      if (user) validOwnerId = user.id;
+    }
+
+    const newTruck = await prisma.truck.create({
+      data: {
+        licensePlate,
+        model,
+        type,
+        capacity: parseFloat(capacity) || 0,
+        maxWeight: parseFloat(maxWeight) || 0,
+        maxVolume: parseFloat(maxVolume) || 0,
+        warehouseId: warehouseId || null,
+        courierCompanyId: validCompanyId,
+        ownerId: validOwnerId
+      }
+    });
+
+    res.json({ success: true, data: newTruck });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
 router.use(authenticateToken);
 
 router.post('/location', truckController.updateLocation);

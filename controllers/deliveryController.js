@@ -1,5 +1,7 @@
+
 const prisma = require('../config/database');
 const Joi = require('joi');
+const { getDhsCourierId } = require('../utils/db_helpers');
 
 /**
  * GET /api/deliveries/assigned - Driver's active/pending deliveries
@@ -386,6 +388,16 @@ const createDelivery = async (req, res) => {
             });
         }
 
+        // Single-tenant fallback logic for courierCompanyId
+        let validCompanyId = courierCompanyId;
+        if (!validCompanyId) {
+            try {
+                validCompanyId = await getDhsCourierId();
+            } catch (err) {
+                return res.status(500).json({ success: false, message: err.message });
+            }
+        }
+
         // Generate unique package ID
         const packageId = `PKG-${Date.now()}-${Math.random().toString(36).substr(2, 9).toUpperCase()}`;
 
@@ -409,7 +421,7 @@ const createDelivery = async (req, res) => {
                 timeWindowStart: timeWindowStart ? new Date(timeWindowStart) : null,
                 timeWindowEnd: timeWindowEnd ? new Date(timeWindowEnd) : null,
                 // specialInstructions: specialInstructions || null,
-                courierCompanyId: courierCompanyId || null,
+                courierCompanyId: validCompanyId,
                 status: 'PENDING',
                 dispatcherId: finalDispatcherId
             }
