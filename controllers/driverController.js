@@ -47,10 +47,12 @@ exports.createDriver = async (req, res) => {
         const status = body.status;
 
         if (!name) {
-            return res.status(400).json({
-                message: "Name is required.",
-                hint: "Send 'name', 'driverName', or 'fullName' in the request body.",
-                receivedFields: Object.keys(body)  // shows what fields were actually sent
+            // TEMP DEBUG: echo back everything received so we can see frontend payload
+            return res.status(200).json({
+                debug: true,
+                message: "Name field not found. Check 'receivedBody' to see what was sent.",
+                receivedBody: body,
+                receivedFields: Object.keys(body)
             });
         }
 
