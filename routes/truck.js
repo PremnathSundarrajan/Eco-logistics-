@@ -100,4 +100,14 @@ router.get("/", async (req, res) => {
   }
 });
 
+// GET single truck by ID
+router.get("/:id", truckController.getTruckById);
+
+// PUT update truck
+router.put("/:id", truckController.updateTruck);
+
+// DELETE truck
+router.delete("/:id", truckController.deleteTruck);
+
 module.exports = router;
+

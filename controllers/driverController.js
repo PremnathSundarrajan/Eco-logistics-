@@ -1,134 +1,79 @@
+// src/controllers/driverController.js
 const { PrismaClient } = require('@prisma/client');
 const prisma = new PrismaClient();
 
+// Fetch all users designated as DRIVERS
 exports.getAllDrivers = async (req, res) => {
     try {
-        const { search, status } = req.query;
         const drivers = await prisma.user.findMany({
-            where: {
-                role: 'DRIVER',
-                AND: [
-                    search ? {
-                        OR: [
-                            { name: { contains: search, mode: 'insensitive' } },
-                            { currentVehicleNo: { contains: search, mode: 'insensitive' } },
-                            { homeBaseCity: { contains: search, mode: 'insensitive' } }
-                        ]
-                    } : {},
-                    status ? { status: status.toUpperCase().replace(' ', '_') } : {},
-                    { registrationStatus: { not: 'REJECTED' } }
-                ]
-            },
-            include: {
-                trucks: true,
-        
-            }
+            where: { role: 'DRIVER' }
         });
-
-        const formattedDrivers = drivers.map(d => ({
-            id: d.id,
-            name: d.name,
-            vehicle: d.trucks?.[0]?.model || d.vehicleType || 'Unknown Vehicle',
-            plate: d.currentVehicleNo || d.trucks?.[0]?.licensePlate || 'N/A',
-            rating: d.rating,
-            trips: d.deliveriesCount,
-            status: d.status.split('_').map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase()).join(' '),
-            avatar: d.initials || d.name.split(' ').map(n => n[0]).join(''),
-            color: d.avatarColor || 'bg-orange-500',
-            phone: d.phone,
-            type: d.vehicleType || d.trucks?.[0]?.type || 'Standard',
-            loc: d.homeBaseCity || 'Unknown'
-        }));
-
-        res.json(formattedDrivers);
-    } catch (error) {
-        res.status(500).json({ error: error.message });
+        res.status(200).json(drivers);
+    } catch (err) {
+        console.error("Fetch Drivers Error:", err);
+        res.status(500).json({ message: "Failed to fetch drivers." });
     }
 };
 
+// Fetch a single driver by ID
 exports.getDriverById = async (req, res) => {
     try {
         const driver = await prisma.user.findUnique({
-            where: { id: req.params.id }
+            where: {
+                id: req.params.id,
+                role: 'DRIVER'
+            }
         });
-        if (!driver) return res.status(404).json({ message: 'Driver not found' });
-        res.json(driver);
-    } catch (error) {
-        res.status(500).json({ error: error.message });
+        if (!driver) return res.status(404).json({ message: "Driver not found." });
+        res.status(200).json(driver);
+    } catch (err) {
+        res.status(500).json({ message: "Failed to fetch driver." });
     }
 };
 
+// Create a pristine genuine Driver (Requires 'name')
 exports.createDriver = async (req, res) => {
     try {
-        const driver = await prisma.user.create({
-                data: {
-                    name: name,
-                    phone: phone || "",
-                    licensePlate: currentVehicleNo, // Mapping frontend to backend schema
-                    type: vehicleType || "Standard", 
-                    role: role || "DRIVER",
-                    model: "Not Specified",
-                    capacity: 1000,
-                    maxWeight: 1000,
-                    maxVolume: 500,
-                    warehouseId: "1", 
-                    status: status || "ON_DUTY"
-                }
+        // We unpack the body. If your existing AddDriver form sends specific fields, they are passed here.
+        const driverData = req.body;
+
+        // Create the user explicitly as a DRIVER
+        const newDriver = await prisma.user.create({
+            data: {
+                ...driverData,
+                role: 'DRIVER'
+            }
         });
-            return res.status(201).json({
-                success: true,
-                message: "Driver created successfully",
-                driver
-            });
-    } catch (error) {
-        res.status(500).json({ error: error.message });
+
+        res.status(201).json(newDriver);
+    } catch (err) {
+        console.error("Create Driver Error:", err);
+        res.status(500).json({ message: "Failed to create driver.", error: err.message });
     }
-        console.error("Error creating driver:", error);
-    
-        // Handle unique constraint failures (like duplicate license plates)
-        if (error.code === 'P2002') {
-            return res.status(400).json({ 
-                success: false,
-                message: "A driver with this information (possibly license plate or phone) already exists." 
-            });
-        }
-        return res.status(500).json({ 
-            success: false,
-            message: "Failed to create driver", 
-            error: error.message 
-        });
-    };
 };
 
+// Update an existing driver
 exports.updateDriver = async (req, res) => {
     try {
-        const driver = await prisma.user.update({
+        const updatedDriver = await prisma.user.update({
             where: { id: req.params.id },
             data: req.body
         });
-        res.json(driver);
-    } catch (error) {
-        res.status(500).json({ error: error.message });
+        res.status(200).json(updatedDriver);
+    } catch (err) {
+        res.status(500).json({ message: "Failed to update driver." });
     }
 };
 
+// Delete a driver
 exports.deleteDriver = async (req, res) => {
     try {
-        const timestamp = Date.now();
-        await prisma.user.update({ 
-            where: { id: req.params.id },
-            data: {
-                registrationStatus: 'REJECTED',
-                status: 'OFF_DUTY',
-                name: 'Deleted Driver',
-                phone: `deleted_${timestamp}_${req.params.id.substring(0, 5)}`,
-                qrCode: `deleted_${timestamp}_${req.params.id.substring(0, 5)}`,
-                currentVehicleNo: null
-            }
+        await prisma.user.delete({
+            where: { id: req.params.id }
         });
-        res.status(204).send();
-    } catch (error) {
-        res.status(500).json({ error: error.message });
+        res.status(200).json({ message: "Driver successfully removed." });
+    } catch (err) {
+        res.status(500).json({ message: "Failed to delete driver." });
     }
 };
 
@@ -138,7 +83,7 @@ exports.getActiveRoute = async (req, res) => {
         const activeRoute = await prisma.optimizedRoute.findFirst({
             where: {
                 truckId: truckId,
-                status: { in: ['Allocated', 'Active'] } 
+                status: { in: ['Allocated', 'Active'] }
             },
             orderBy: { createdAt: 'desc' }
         });
@@ -150,8 +95,8 @@ exports.getActiveRoute = async (req, res) => {
         res.json({
             truckId: truckId,
             routeId: activeRoute.id,
-            polyline: activeRoute.routePolyline, 
-            checkpoints: activeRoute.waypoints || [] 
+            polyline: activeRoute.routePolyline,
+            checkpoints: activeRoute.waypoints || []
         });
     } catch (error) {
         res.status(500).json({ error: error.message });

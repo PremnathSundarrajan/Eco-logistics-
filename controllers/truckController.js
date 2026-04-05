@@ -1,4 +1,5 @@
-const prisma = require('../config/database');
+const { PrismaClient } = require('@prisma/client');
+const prisma = new PrismaClient();
 const { detectAbsorptionOpportunity } = require('./synergyController');
 
 /**
@@ -35,7 +36,6 @@ exports.updateLocation = async (req, res) => {
         });
 
         // 3. Trigger Proximity Check
-        // We do this asynchronously or after response in a real app, but here we process it
         const opportunity = await detectAbsorptionOpportunity(truckId, lat, lng, io);
 
         res.status(200).json({
@@ -50,3 +50,92 @@ exports.updateLocation = async (req, res) => {
     }
 };
 
+/**
+ * GET /api/trucks
+ * Fetch all trucks (lightweight admin view)
+ */
+exports.getAllTrucks = async (req, res) => {
+    try {
+        const trucks = await prisma.truck.findMany();
+        res.status(200).json(trucks);
+    } catch (err) {
+        console.error("Fetch Trucks Error:", err);
+        res.status(500).json({ message: "Failed to fetch trucks." });
+    }
+};
+
+/**
+ * GET /api/trucks/:id
+ * Fetch a single truck by ID
+ */
+exports.getTruckById = async (req, res) => {
+    try {
+        const truck = await prisma.truck.findUnique({
+            where: { id: req.params.id }
+        });
+        if (!truck) return res.status(404).json({ message: "Truck not found." });
+        res.status(200).json(truck);
+    } catch (err) {
+        res.status(500).json({ message: "Failed to fetch truck." });
+    }
+};
+
+/**
+ * POST /api/trucks
+ * Create a new truck (handled inline in routes/truck.js for existing app compatibility)
+ */
+exports.createTruck = async (req, res) => {
+    try {
+        const payload = req.body;
+
+        const newTruck = await prisma.truck.create({
+            data: {
+                licensePlate: payload.licensePlate,
+                model: payload.model,
+                type: payload.type,
+                capacity: parseFloat(payload.capacity) || 0,
+                maxWeight: parseFloat(payload.maxWeight) || 0,
+                maxVolume: parseFloat(payload.maxVolume) || 0,
+                warehouseId: payload.warehouseId || null,
+                isAvailable: true,
+                ownerId: req.user?.id || null
+            }
+        });
+        res.status(201).json(newTruck);
+    } catch (err) {
+        console.error("Create Truck Error:", err);
+        if (err.code === 'P2002') return res.status(400).json({ message: "A truck with this license plate already exists." });
+        res.status(500).json({ message: "Failed to create truck." });
+    }
+};
+
+/**
+ * PUT /api/trucks/:id
+ * Update an existing truck
+ */
+exports.updateTruck = async (req, res) => {
+    try {
+        const updatedTruck = await prisma.truck.update({
+            where: { id: req.params.id },
+            data: req.body
+        });
+        res.status(200).json(updatedTruck);
+    } catch (err) {
+        res.status(500).json({ message: "Failed to update truck." });
+    }
+};
+
+/**
+ * DELETE /api/trucks/:id
+ * Remove a truck
+ */
+exports.deleteTruck = async (req, res) => {
+    try {
+        await prisma.truck.delete({
+            where: { id: req.params.id }
+        });
+        res.status(200).json({ message: "Truck successfully removed." });
+    } catch (err) {
+        res.status(500).json({ message: "Failed to delete truck." });
+    }
+};
