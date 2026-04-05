@@ -34,29 +34,13 @@ exports.getDriverById = async (req, res) => {
 // Create a new Driver
 exports.createDriver = async (req, res) => {
     try {
-        const body = req.body;
-
-        // Accept various name field keys the frontend might send
-        const name = body.name || body.driverName || body.fullName || body.driver_name;
-        const phone = body.phone || body.phoneNumber || body.mobile;
-        const vehicleType = body.vehicleType || body.vehicle_type || body.type;
-        const currentVehicleNo = body.currentVehicleNo || body.licensePlate || body.vehiclePlate || body.plate;
-        const homeBaseCity = body.homeBaseCity || body.city || body.location;
-        const avatarColor = body.avatarColor || body.color;
-        const initials = body.initials;
-        const status = body.status;
+        const { name, phone, vehicleType, currentVehicleNo, homeBaseCity, avatarColor, initials, status } = req.body;
 
         if (!name) {
-            // TEMP DEBUG: echo back everything received so we can see frontend payload
-            return res.status(200).json({
-                debug: true,
-                message: "Name field not found. Check 'receivedBody' to see what was sent.",
-                receivedBody: body,
-                receivedFields: Object.keys(body)
-            });
+            return res.status(400).json({ message: "Name is required." });
         }
 
-        // phone is required+unique in DB — generate a placeholder if not provided
+        // phone is required+unique in DB — generate placeholder if not provided
         const uniquePhone = phone && phone.trim() !== ""
             ? phone.trim()
             : `unset_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
