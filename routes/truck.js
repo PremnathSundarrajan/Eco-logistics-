@@ -87,7 +87,7 @@ router.get("/", async (req, res) => {
 
         // Included user relations just in case you use them in the UI
         owner: {
-          select: { id: true, name: true, email: true },
+          select: { id: true, name: true, phone: true },
         },
       },
       // You might want to optionally filter out unavailable trucks
