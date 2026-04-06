@@ -64,7 +64,7 @@ router.use(authenticateToken);
 router.post("/location", truckController.updateLocation);
 // routes/truckRoutes.js (or wherever your truck logic lives)
 
-// GET all trucks (or drivers)
+// GET all trucks
 router.get("/", async (req, res) => {
   try {
     const trucks = await prisma.truck.findMany({
